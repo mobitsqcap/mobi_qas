@@ -1,0 +1,52 @@
+{
+  "xsappname": "mobi_dev_cap-MOBIVERSA_PRIVATE_LIMITED-Mobi_dev_space",
+  "tenant-mode": "dedicated",
+  "scopes": [
+    {
+      "name": "$XSAPPNAME.Read",
+      "description": "Read-only access to GL account value lookup data"
+    },
+    {
+      "name": "$XSAPPNAME.Admin",
+      "description": "Administrative access to GL account value lookup data"
+    },
+    {
+      "name": "$XSAPPNAME.Jobs",
+      "description": "SAP Job Scheduling service scope",
+      "grant-as-authority-to-apps": [
+        "$XSSERVICENAME(mobi_job_dev)"
+      ]
+    }
+  ],
+  "role-templates": [
+      {
+      "name": "Read",
+      "description": "Can view GL account data",
+      "scope-references": [
+        "$XSAPPNAME.Read"
+      ]
+    },
+    {
+      "name": "Admin",
+      "description": "Can view and manage GL account data",
+      "scope-references": [
+        "$XSAPPNAME.Read",
+        "$XSAPPNAME.Admin"
+      ]
+    },
+    {
+      "name": "Jobs",
+      "description": "Technical role for SAP Job Scheduling service",
+      "scope-references": [
+        "$XSAPPNAME.Jobs"
+      ]
+    }
+  ],
+  "oauth2-configuration": {
+    "redirect-uris": [
+      "https://*.cfapps.us10-001.hana.ondemand.com/**",
+      "https://*.hana.ondemand.com/**",
+      "https://*"
+    ]
+  }
+}

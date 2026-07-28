@@ -1,0 +1,141 @@
+<mvc:View
+    controllerName="displayglvlookup.controller.View1"
+    xmlns:mvc="sap.ui.core.mvc"
+    xmlns="sap.m"
+>
+    <Page id="page">
+        <!-- Header -->
+        <customHeader>
+            <Bar>
+                <!-- MOBI Logo -->
+                <contentLeft>
+                    <Image
+                        src="images/mobi-logo.png"
+                        width="130px"
+                        height="55px"
+                        decorative="false"
+                        alt="MOBI Logo"
+                    />
+                </contentLeft>
+
+                <contentMiddle />
+
+                <!-- Right Buttons -->
+                <contentRight>
+                    <Button
+                        id="btnDownload"
+                        text="Download Data"
+                        icon="sap-icon://download"
+                        press="onDownloadData"
+                    />
+                </contentRight>
+            </Bar>
+        </customHeader>
+
+        <!-- Page Content -->
+        <content>
+            <HBox
+                width="100%"
+                justifyContent="End"
+                class="sapUiSmallMarginBottom"
+            >
+                <Button
+                    id="btnDisplay"
+                    text="Display GL Data"
+                    type="Emphasized"
+                    icon="sap-icon://table-view"
+                    press="onDisplayGLData"
+                />
+            </HBox>
+
+            <VBox
+                width="100%"
+                class="sapUiMediumMargin"
+            >
+                <!-- Optional Message Strip -->
+                <MessageStrip
+                    id="msgCount"
+                    visible="false"
+                    type="Information"
+                    showCloseButton="false"
+                     text=""
+                    class="sapUiSmallMarginBottom"
+                />
+
+                <!-- GL Data Table -->
+                <Table
+                    id="idTable"
+                    width="100%"
+                    inset="false"
+                    growing="true"
+                    growingScrollToLoad="true"
+                    items="{tableModel>/data}"
+                >
+                    <columns>
+                        <Column>
+                            <Text text="Company Code" />
+                        </Column>
+
+                        <Column>
+                            <Text text="Payment Type" />
+                        </Column>
+
+                        <Column>
+                            <Text text="Payment Sub Type" />
+                        </Column>
+
+                        <Column>
+                            <Text text="Host" />
+                        </Column>
+
+                        <Column>
+                            <Text text="Transaction Amount" />
+                        </Column>
+
+                        <Column>
+                            <Text text="Host MDR Amount" />
+                        </Column>
+
+                        <Column>
+                            <Text text="Host Fee Payable" />
+                        </Column>
+
+                        <Column>
+                            <Text text="Mobi MDR Amount" />
+                        </Column>
+
+                        <Column>
+                            <Text text="MDR Revenue" />
+                        </Column>
+
+                        <Column>
+                            <Text text="GL Accounts" />
+                        </Column>
+
+                        <Column>
+                            <Text text="Status" />
+                        </Column>
+                    </columns>
+
+                    <items>
+                        <ColumnListItem>
+                            <cells>
+                                <Text text="{tableModel>Company Code}" />
+                                <Text text="{tableModel>Payment Type}" />
+                                <Text text="{tableModel>Payment Sub Type}" />
+                                <Text text="{tableModel>Host}" />
+                                <Text text="{tableModel>transaction_amount}" />
+                                <Text text="{tableModel>host_mdr_amount}" />
+                                <Text text="{tableModel>host_fee_payable}" />
+                                <Text text="{tableModel>mobi_mdr_amount}" />
+                                <Text text="{tableModel>mdr_revenue}" />
+                                <Text text="{tableModel>GL Accounts}" />
+                                <Text text="{tableModel>Status}" />
+                            </cells>
+                        </ColumnListItem>
+                    </items>
+                </Table>
+            </VBox>
+        </content>
+    </Page>
+</mvc:View>
