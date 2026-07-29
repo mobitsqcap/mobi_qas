@@ -1,32 +1,22 @@
-const Constants = require('../utils/Constants');
-const F = require('../utils/StatusCodeUtil').FRIENDLY;
-
+// class DuplicateValidator {
+//   constructor(transactionRepository) { this.transactionRepository = transactionRepository; }
+//   async validate(record) {
+//     const exists = await this.transactionRepository.exists(record.COMPANY_CODE, record.MOBI_REFERENCE_ID, record.PAYMENT_TYPE);
+//     if (exists) return { valid: false, code: 'DUPLICATE_TRANSACTION', message: `Duplicate ${record.MOBI_REFERENCE_ID}` };
+//     return { valid: true };
+//   }
+// }
+// module.exports = DuplicateValidator;
 class DuplicateValidator {
-  constructor(transactionRepository) {
-    this.transactionRepository = transactionRepository;
-  }
-
+  constructor(transactionRepository) { this.transactionRepository = transactionRepository; }
   async validate(record) {
-    const errors = [];
-
     if (await this.transactionRepository.existsByMobiReferenceId(record.MOBI_REFERENCE_ID)) {
-      errors.push({
-        code: Constants.ERROR_CODES.DUPLICATE_MOBI_REF,
-        message: F.duplicateMobiRefDb(record.MOBI_REFERENCE_ID)
-      });
+      return { valid: false, code: 'DUPLICATE_MOBI_REFERENCE_ID', message: `MOBI reference ID already exists: ${record.MOBI_REFERENCE_ID}` };
     }
-
-    if (await this.transactionRepository.existsHostReferenceOnEitherDate(
-      record.HOST_REFERENCE_ID, record.TXN_CREATED_DATE, record.TXN_PAID_DATE)) {
-      errors.push({
-        code: Constants.ERROR_CODES.DUPLICATE_HOST_REF,
-        message: F.duplicateHostRefDb(record.HOST_REFERENCE_ID)
-      });
+    if (await this.transactionRepository.existsHostReferenceOnEitherDate(record.HOST_REFERENCE_ID, record.TXN_CREATED_DATE, record.TXN_PAID_DATE)) {
+      return { valid: false, code: 'DUPLICATE_HOST_REFERENCE_ID', message: `Host reference ID already exists on the same transaction day: ${record.HOST_REFERENCE_ID}` };
     }
-
-    if (errors.length === 0) return { valid: true, errors: [] };
-    return { valid: false, errors };
+    return { valid: true };
   }
 }
-
 module.exports = DuplicateValidator;

@@ -1,4 +1,5 @@
 namespace mobi.db;
+
 entity MOBI_DB_STATUS {
     key CATEGORY    : String(20); // e.g. 'MASTER', 'TRANSACTION', 'CONSOL', 'FILE', 'POSTING'
     key CODE        : String(2); // 2-digit/2-char code ('01','02',...)
@@ -35,7 +36,7 @@ entity MOBI_DB_AUDIT {
 }
 
 entity MOBI_DB_MASTER {
-           key ID                          : String(20);
+    key ID                          : String(20);
         AUDIT_ID                    : String(36);
         MOBI_PORTAL_CODE            : String(2);
         SAP_COMPANY_CODE            : String(4);
@@ -45,7 +46,7 @@ entity MOBI_DB_MASTER {
         COUNTRY                     : String(80);
         COUNTRY_CODE                : String(2);
         BUSINESS_REG_NO_TIN         : String(50);
-    MASTER_NAME                 : String(40);
+        MASTER_NAME                 : String(40);
         EXTERNAL_BP_NUMBER          : String(20);
         BP_NUMBER                   : String(10);
         CONSOLIDATED                : String(4);
@@ -226,7 +227,7 @@ entity MOBI_DB_CONSOLIDATIONLINEITEM {
 
 entity MOBI_DB_PROCESSING_LOCK {
 
-    key LOCK_KEY     : String(120); 
+    key LOCK_KEY     : String(120);
 
         LOCK_SCOPE   : String(40);
 
@@ -236,9 +237,9 @@ entity MOBI_DB_PROCESSING_LOCK {
 
         OWNER_ID     : String(64);
 
-        LOCK_ID      : String(36); 
+        LOCK_ID      : String(36);
 
-        STATUS       : String(16); 
+        STATUS       : String(16);
 
         ACQUIRED_AT  : Timestamp;
 

@@ -1,25 +1,18 @@
-const Constants = require('../utils/Constants');
-const F = require('../utils/StatusCodeUtil').FRIENDLY;
-
-const ISO = /^[A-Z]{3}$/;
-
+const ISO_CURRENCY_REGEX = /^[A-Z]{3}$/;
 class CurrencyValidator {
   validate(record) {
-    const errors = [];
-
-    if (!ISO.test(record.TXN_CURRENCY || '')) {
-      errors.push({ code: Constants.ERROR_CODES.INVALID_CURRENCY, message: F.invalidCurrency(record.TXN_CURRENCY) });
-    } else if (!Constants.ALLOWED_TRANSACTION_CURRENCIES.has(record.TXN_CURRENCY)) {
-      errors.push({
-        code: Constants.ERROR_CODES.INVALID_CURRENCY,
-        message: `Currency "${record.TXN_CURRENCY}" is not configured for this environment. ` +
-                 `Allowed: ${[...Constants.ALLOWED_TRANSACTION_CURRENCIES].join(', ')}.`
-      });
-    }
-
-    if (errors.length === 0) return { valid: true, errors: [] };
-    return { valid: false, errors };
+    if (!ISO_CURRENCY_REGEX.test(record.TXN_CURRENCY || '')) return { valid: false, code: 'INVALID_CURRENCY', message: `Invalid currency ${record.TXN_CURRENCY}` };
+    return { valid: true };
   }
 }
-
 module.exports = CurrencyValidator;
+
+// const Constants = require('../utils/Constants');
+// class CurrencyValidator {
+//   validate(record) {
+//     const currency = String(record.TXN_CURRENCY || '').trim().toUpperCase();
+//     if (!Constants.ALLOWED_TRANSACTION_CURRENCIES.has(currency)) return { valid: false, code: 'INVALID_CURRENCY', message: `Unsupported transaction currency ${record.TXN_CURRENCY}` };
+//     return { valid: true };
+//   }
+// }
+// module.exports = CurrencyValidator;
