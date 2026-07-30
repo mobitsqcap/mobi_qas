@@ -2,6 +2,7 @@
   "_version": "1.86.0",
   "sap.app": {
     "id": "glvlookup",
+    
     "type": "application",
     "i18n": "i18n/i18n.properties",
     "applicationVersion": {

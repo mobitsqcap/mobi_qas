@@ -1,17 +1,12 @@
 'use strict';
 
 /**
- * StatusCodeUtil – Shared status/error code mapping backed by MOBI_DB_STATUS.
+ * Shared three-digit status/error mapping backed by MOBI_DB_STATUS.
  *
- *  - MOBI_DB_STATUS contains only STATUS_CODE (3-digit) and DESCRIPTION.
- *  - All modules use the same global 3-digit status codes.
- *  - AUDIT / TRANSACTION / FILELOG / FILEBATCH / MASTER store 3-digit STATUS_CODE.
- *  - CONSOLIDATION_HEADER / LINE_ITEM use a single 3-digit STATUS_CODE.
- *  - FRIENDLY messages provide detailed user-readable explanations.
+ * @sap/cds is required lazily (only inside ensureStatusTable) so the pure
+ * helpers (toText / toCode / normalizeCode / concatErrorDetail / ...) can be
+ * unit-tested and reused without a running database.
  */
-
-const cds = require('@sap/cds');
-const { INSERT } = cds.ql;
 
 const STATUS = Object.freeze({
   // General processing
@@ -90,26 +85,6 @@ const STATUS = Object.freeze({
   '100': 'UNKNOWN_ERROR'
 });
 
-const LEGACY_ALIASES = Object.freeze({
-  'RECEIVED': '011',
-  'FILE_RECEIVED': '011',
-  'PARTIALLY_PROCESSED': '005',
-  'PARTIALLY_COMPLETED': '005',
-  'BP CREATION SUCCESS': '006',
-  'BP FAILED': '004',
-  'NOT_INSERTED': '010',
-  'VALIDATION_FAILED': '023',
-  'ERROR': '004',
-  'PATCHED': '006',
-  '01': '006',
-  '02': '060',
-  '03': '061',
-  '04': '056',
-  '05': '059',
-  '06': '055',
-  '07': '062'
-});
-
 const FRIENDLY = Object.freeze({
   invalidFileName: (fileName, expected) =>
     `File name does not match the expected pattern. Received: "${fileName}". Expected format: ${expected}. Please rename the file to the correct pattern and re-upload.`,
@@ -129,18 +104,6 @@ const FRIENDLY = Object.freeze({
     `Invalid COUNTRY_CODE "${value}". Must be a valid 2-letter ISO country code (e.g. IN, SG, MY, ID, AE). Please correct and re-upload.`,
   duplicateIdInBatch: (id) =>
     `Duplicate ID "${id}" found within the same file. Each merchant/host must be unique per file. Please remove the duplicate and re-upload.`,
-  duplicateBpInDb: (id, company, portal) =>
-    `Duplicate External BP Number "${id}" already exists in the system (Company: ${company}, Portal: ${portal}). Please use a unique ID or update the existing record.`,
-  crossCompanyDuplicate: (id, existingCode, newCode) =>
-    `BP ID "${id}" already exists under Company Code "${existingCode}". It cannot be created again under Company Code "${newCode}". Please verify the company code and re-upload.`,
-  duplicateMobiRef: (ref) =>
-    `Duplicate MOBI_REFERENCE_ID "${ref}" in file. Each transaction reference must be unique.`,
-  duplicateHostRef: (ref, date) =>
-    `Duplicate HOST_REFERENCE_ID "${ref}" on transaction date ${date}. Host reference must be unique per day.`,
-  duplicateMobiRefDb: (ref) =>
-    `MOBI_REFERENCE_ID "${ref}" already exists in the database. Please use a unique reference ID.`,
-  duplicateHostRefDb: (ref) =>
-    `HOST_REFERENCE_ID "${ref}" already exists for the same transaction day in the database.`,
   invalidAmount: (value) =>
     `Invalid transaction amount "${value}". Amount must be a positive number greater than zero.`,
   invalidCurrency: (value) =>
@@ -157,6 +120,18 @@ const FRIENDLY = Object.freeze({
     `${field} exceeds ${maxLen} characters. Please shorten the reference ID.`,
   exponentialRef: (field, value) =>
     `${field} "${value}" must not be an exponential/scientific number. Please provide the full reference ID as text.`,
+  duplicateMobiRef: (ref) =>
+    `Duplicate MOBI_REFERENCE_ID "${ref}" in file. Each transaction reference must be unique.`,
+  duplicateHostRef: (ref, date) =>
+    `Duplicate HOST_REFERENCE_ID "${ref}" on transaction date ${date}. Host reference must be unique per day.`,
+  duplicateMobiRefDb: (ref) =>
+    `MOBI_REFERENCE_ID "${ref}" already exists in the database. Please use a unique reference ID.`,
+  duplicateHostRefDb: (ref) =>
+    `HOST_REFERENCE_ID "${ref}" already exists for the same transaction day in the database.`,
+  // Requirement change: unified master-data lookup message. {value} is the
+  // merchant id / host name / portal / company that could not be found.
+  noMasterDataFound: (value) =>
+    `No master data found "${value}"`,
   invalidMerchant: (id) =>
     `Merchant ID "${id}" is not active for the given portal/company combination. Please check master data or correct the ID.`,
   invalidHost: (host) =>
@@ -167,60 +142,76 @@ const FRIENDLY = Object.freeze({
     `Company code "${company}" is not valid for portal "${portal}". Please verify the company/portal combination.`,
   fileMoveFailed: (from, to, reason) =>
     `Failed to move file from "${from}" to "${to}". Reason: ${reason}. Please check SFTP permissions/folder availability.`,
-  fileDownloadFailed: (path, reason) =>
-    `Failed to download file "${path}". Reason: ${reason}.`,
+  fileDownloadFailed: (remotePath, reason) =>
+    `Failed to download file "${remotePath}". Reason: ${reason}.`,
   sftpConnection: (reason) =>
-    `SFTP connection failed: ${reason}. Please verify destination configuration.`,
-  caseInsensitiveDuplicate: (value, existing) =>
-    `Master ID "${value}" conflicts (case-insensitive) with existing ID "${existing}" for the same portal and company. Master IDs are case-insensitive; please use a unique value.`
+    `SFTP connection failed: ${reason}. Please verify destination configuration.`
 });
 
-/**
- * Convert status code to description.
- * toText('014') -> 'INVALID_FILE_NAME'
- */
 function toText(code) {
   if (!code) return '';
-  const s = String(code).padStart(3, '0');
-  return STATUS[s] || String(code);
+  const normalized = String(code).trim().padStart(3, '0');
+  return STATUS[normalized] || normalized;
 }
 
-/**
- * Convert text or legacy code to 3-digit status code.
- * Supports both toCode(text, defaultCode) and legacy 3-argument
- * toCode(category, text, defaultCode) for backwards compatibility.
- */
-function toCode(arg1, arg2 = null, arg3 = null) {
-  const text = arg3 !== null ? arg2 : arg1;
-  const defaultCode = arg3 !== null ? arg3 : arg2;
+function toCode(text, defaultCode = null) {
   if (!text) return defaultCode;
-
   const value = String(text).trim().toUpperCase();
-  if (LEGACY_ALIASES[value]) return LEGACY_ALIASES[value];
-
+  if (STATUS[value]) return value;
   for (const [code, description] of Object.entries(STATUS)) {
     if (description === value) return code;
   }
-  if (STATUS[value]) return value;
-
   return defaultCode;
 }
 
-function describe(code) {
-  const c = toCode(code, String(code || '').padStart(3, '0'));
-  return { code: c, text: toText(c) };
+function normalizeCode(value, defaultText = 'UNKNOWN_ERROR') {
+  return toCode(value, toCode(defaultText, '100'));
+}
+
+function describe(value) {
+  const code = normalizeCode(value);
+  return { code, text: toText(code) };
+}
+
+/**
+ * Canonical, fully-concatenated error detail for a record. Used by BOTH the
+ * error text file and the audit so they always show the exact same string.
+ * Format: "CODE1: message1 || CODE2: message2".
+ */
+function concatErrorDetail(errors) {
+  if (!errors?.length) return '';
+  return errors
+    .map((error) => {
+      const code = toText(normalizeCode(error.code));
+      const message = String(error.message || '').replace(/[\r\n]+/g, ' ').trim();
+      return `${code}: ${message}`;
+    })
+    .join(' || ');
+}
+
+/**
+ * Resolve the canonical detail for an already-validated record. Prefers the
+ * structured validation errors; falls back to STATUS_MESSAGE for file-level
+ * errors (duplicate file name, invalid file name, hard failure) that have no
+ * structured errors.
+ */
+function recordErrorDetail(record) {
+  const errors = record?._VALIDATION_ERRORS || [];
+  if (errors.length) return concatErrorDetail(errors);
+  return String(record?.STATUS_MESSAGE || '').replace(/[\r\n]+/g, ' ').trim();
 }
 
 async function ensureStatusTable() {
+  const cds = require('@sap/cds');
+  const { INSERT } = cds.ql;
   try {
     const db = await cds.connect.to('db');
     const entries = Object.entries(STATUS).map(([STATUS_CODE, DESCRIPTION]) => ({
       STATUS_CODE,
       DESCRIPTION
     }));
-    const chunkSize = 100;
-    for (let i = 0; i < entries.length; i += chunkSize) {
-      const chunk = entries.slice(i, i + chunkSize);
+    for (let index = 0; index < entries.length; index += 100) {
+      const chunk = entries.slice(index, index + 100);
       try {
         await db.run(INSERT.into('mobi.db.MOBI_DB_STATUS').entries(chunk));
       } catch (err) {
@@ -235,16 +226,18 @@ async function ensureStatusTable() {
   }
 }
 
+// Kept for backward compatibility with any caller that used the [n] (code) format.
 function joinErrorDetails(errors) {
-  if (!errors || !errors.length) return '';
+  if (!errors?.length) return '';
   return errors
-    .map((e, idx) => `[${idx + 1}] (${e.code || '100'}) ${e.message}`)
+    .map((error, index) =>
+      `[${index + 1}] (${normalizeCode(error.code)}) ${String(error.message || '').trim()}`)
     .join(' || ');
 }
 
 function joinErrorCodes(errors) {
-  if (!errors || !errors.length) return '';
-  return [...new Set(errors.map((e) => String(e.code || '100').padStart(3, '0')))].join(',');
+  if (!errors?.length) return '';
+  return [...new Set(errors.map((error) => normalizeCode(error.code)))].join(',');
 }
 
 module.exports = Object.freeze({
@@ -252,7 +245,10 @@ module.exports = Object.freeze({
   FRIENDLY,
   toText,
   toCode,
+  normalizeCode,
   describe,
+  concatErrorDetail,
+  recordErrorDetail,
   ensureStatusTable,
   joinErrorDetails,
   joinErrorCodes

@@ -1,17 +1,21 @@
+'use strict';
+
 const cds = require('@sap/cds');
 const { SELECT } = cds.ql;
+
 const Constants = require('../utils/Constants');
 
+const ENTITY = 'mobi.db.MOBI_DB_MASTER';
+
 class MasterRepository {
-  async findActiveByIds(ids) {
-    const uniqueIds = [...new Set(ids.filter(Boolean))];
-    if (!uniqueIds.length) return [];
-    const db = await cds.connect.to('db');
-    return db.run(SELECT.from('mobi.db.MOBI_DB_MASTER').where({ ID: { in: uniqueIds }, ACTIVE_FLAG: Constants.ACTIVE_FLAG }));
-  }
   async findActiveForValidation() {
     const db = await cds.connect.to('db');
-    return db.run(SELECT.from('mobi.db.MOBI_DB_MASTER').where({ ACTIVE_FLAG: Constants.ACTIVE_FLAG }));
+    return db.run(
+      SELECT.from(ENTITY)
+        .columns('ID', 'MOBI_PORTAL_CODE', 'SAP_COMPANY_CODE', 'TYPE', 'COUNTRY_CODE')
+        .where({ ACTIVE_FLAG: Constants.ACTIVE_FLAG })
+    );
   }
 }
+
 module.exports = MasterRepository;

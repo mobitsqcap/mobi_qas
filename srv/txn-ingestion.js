@@ -1,13 +1,17 @@
+'use strict';
+
 const cds = require('@sap/cds');
 const { v4: uuid } = require('uuid');
 
 const Constants = require('../txn-ingestion/utils/Constants');
+const StatusCodeUtil = require('../txn-ingestion/utils/StatusCodeUtil');
+
 const SftpService = require('../txn-ingestion/services/SftpService');
 const TransactionCsvService = require('../txn-ingestion/services/TransactionCsvService');
 const TransactionService = require('../txn-ingestion/services/TransactionService');
 const ValidationService = require('../txn-ingestion/services/ValidationService');
 const BatchProcessingService = require('../txn-ingestion/services/BatchProcessingService');
-
+const FileHashService = require('../txn-ingestion/services/FileHashService')
 const MasterRepository = require('../txn-ingestion/repositories/MasterRepository');
 const TransactionRepository = require('../txn-ingestion/repositories/TransactionRepository');
 const FileLogRepository = require('../txn-ingestion/repositories/FileLogRepository');
@@ -19,6 +23,7 @@ const BusinessValidator = require('../txn-ingestion/validators/BusinessValidator
 const CurrencyValidator = require('../txn-ingestion/validators/CurrencyValidator');
 const AmountValidator = require('../txn-ingestion/validators/AmountValidator');
 const DuplicateValidator = require('../txn-ingestion/validators/DuplicateValidator');
+
 const ErrorFileHandler = require('../txn-ingestion/handlers/ErrorFileHandler');
 const SuccessFileHandler = require('../txn-ingestion/handlers/SuccessFileHandler');
 const TransactionFileHandler = require('../txn-ingestion/handlers/TransactionFileHandler');
@@ -26,7 +31,9 @@ const UnifiedIngestionHandler = require('../txn-ingestion/handlers/UnifiedIngest
 
 let transactionRunInProgress = false;
 
-module.exports = cds.service.impl(async function () {
+module.exports = cds.service.impl(async function transactionIngestionService() {
+  await StatusCodeUtil.ensureStatusTable();
+
   const masterRepository = new MasterRepository();
   const transactionRepository = new TransactionRepository();
   const fileLogRepository = new FileLogRepository();
@@ -44,18 +51,22 @@ module.exports = cds.service.impl(async function () {
   });
 
   const transactionService = new TransactionService(transactionRepository);
+
   const batchProcessingService = new BatchProcessingService({
     validationService,
     transactionService,
     fileBatchRepository
   });
 
+  const fileHashService = new FileHashService(fileLogRepository);
+
   const transactionFileHandler = new TransactionFileHandler({
     sftpService,
     csvService: new TransactionCsvService(),
-    batchProcessingService, // Requires the handler patch shown in the answer.
+    batchProcessingService,
     fileLogRepository,
     auditRepository,
+    fileHashService,
     successFileHandler: new SuccessFileHandler(sftpService),
     errorFileHandler: new ErrorFileHandler(sftpService),
     systemUser: Constants.SYSTEM_USERS.SFTP
@@ -63,29 +74,39 @@ module.exports = cds.service.impl(async function () {
 
   const unifiedIngestionHandler = new UnifiedIngestionHandler({
     sftpService,
-    fileLogRepository,
-    auditRepository,
     transactionFileHandler
   });
 
-  const actorOf = (req) =>
-    req?.user?.id || req?.user?.attr?.email || req?.user?.attr?.user_name || 'UNKNOWN_USER';
+  const actorOf = (request) =>
+    request?.user?.id ||
+    request?.user?.attr?.email ||
+    request?.user?.attr?.user_name ||
+    Constants.SYSTEM_USERS.SFTP;
 
-  this.on('getStatus', () => 'Transaction V2 ingestion service is up');
+  this.on('getStatus', () => 'Transaction ingestion service is up');
 
-  this.on('triggerTransactionIngestion', async (req) => {
+  this.on('triggerTransactionIngestion', async (request) => {
     if (transactionRunInProgress) {
-      return { filesProcessed: 0, message: 'Transaction ingestion is already running.', logs: [] };
+      return {
+        filesProcessed: 0,
+        message: 'Transaction ingestion is already running.',
+        logs: []
+      };
     }
 
     transactionRunInProgress = true;
     sftpService.clearTrace();
+
     try {
-      const result = await unifiedIngestionHandler.handle({ actor: actorOf(req), runId: uuid() });
+      const result = await unifiedIngestionHandler.handle({
+        actor: actorOf(request),
+        runId: uuid()
+      });
+
       return {
-        filesProcessed: Number(result?.filesProcessed || 0),
-        message: 'Transaction batch ingestion cycle completed successfully.',
-        logs: [...sftpService.getTrace(), ...(result?.logs || [])]
+        filesProcessed: Number(result.filesProcessed || 0),
+        message: 'Transaction ingestion cycle completed.',
+        logs: [...sftpService.getTrace(), ...(result.logs || [])]
       };
     } catch (error) {
       return {
@@ -94,7 +115,11 @@ module.exports = cds.service.impl(async function () {
         logs: [...sftpService.getTrace(), `Transaction ingestion failed: ${error.message}`]
       };
     } finally {
-      try { await sftpService.disconnect(); } catch (_) { /* ignore */ }
+      try {
+        await sftpService.disconnect();
+      } catch (_) {
+        // The primary processing result is more important than a disconnect warning.
+      }
       transactionRunInProgress = false;
     }
   });

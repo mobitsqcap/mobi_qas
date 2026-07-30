@@ -1,8 +1,16 @@
+'use strict';
+
+const StatusCodeUtil = require('../utils/StatusCodeUtil');
+
 class FileHashService {
-  constructor(fileLogRepository) { this.fileLogRepository = fileLogRepository; }
+  constructor(fileLogRepository) {
+    this.fileLogRepository = fileLogRepository;
+  }
+
   async isDuplicateFile(hash) {
     const existing = await this.fileLogRepository.findByHash(hash);
-    return !!existing && ['COMPLETED', 'PARTIALLY_PROCESSED'].includes(existing.STATUS);
+    return Boolean(existing) && existing.STATUS_CODE === StatusCodeUtil.toCode('COMPLETED');
   }
 }
+
 module.exports = FileHashService;

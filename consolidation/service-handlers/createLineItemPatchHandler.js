@@ -1,19 +1,28 @@
+'use strict';
+
 /**
- * PATCH handler for consolidation line items – updated to log PATCH to audit.
+ * PATCH handler for consolidation line items.
+ *
+ * PATCH is only allowed while STATUS_CODE !== '061' (POSTED). Amount fields and
+ * GL/CC/PC/DC/BP fields can be modified. AuditRepository.updatePatchAudit()
+ * logs every patch to AUDIT (PROCESS_TYPE=PATCH, STATUS_CODE=006 SUCCESS).
  */
+
 const cds = require('@sap/cds');
 const { SELECT, UPDATE } = cds.ql;
+
 const EntityNames = require('../constants/EntityNames');
 const Constants = require('../constants/ConsolidationConstants');
-const PATCHABLE_FIELDS = Object.freeze([
-  'GL_ACCOUNT','COST_CENTER','PROFIT_CENTER','DEBIT_CREDIT_INDICATOR',
-  'SAP_SUPPLIER_NUMBER','SAP_CUSTOMER_NUMBER',
-  'HOST_MDR_AMOUNT','HOST_FEE_PAYABLE','MDR_REVENUE',
-  'AR_PAYIN','AP_PAYIN','AP_PAYOUT','TRANSACTION_AMOUNT'
-]);
-const POSTED = Constants.POSTING_STATUS.POSTED; // '03'
-
 const AuditRepository = require('../repositories/AuditRepository');
+
+const PATCHABLE_FIELDS = Object.freeze([
+  'GL_ACCOUNT', 'COST_CENTER', 'PROFIT_CENTER', 'DEBIT_CREDIT_INDICATOR',
+  'SAP_SUPPLIER_NUMBER', 'SAP_CUSTOMER_NUMBER',
+  'HOST_MDR_AMOUNT', 'HOST_FEE_PAYABLE', 'MDR_REVENUE',
+  'AR_PAYIN', 'AP_PAYIN', 'AP_PAYOUT', 'TRANSACTION_AMOUNT'
+]);
+
+const SC_POSTED = Constants.POSTING_STATUS.POSTED;
 
 module.exports = function createLineItemPatchHandler(scenarioCode) {
   const auditRepo = new AuditRepository({ softFail: true });
@@ -21,7 +30,7 @@ module.exports = function createLineItemPatchHandler(scenarioCode) {
   return async function lineItemPatchHandler(req) {
     const key = (req.params && req.params[0]) || req.data || {};
     const consolRefId = key.CONSOL_REF_ID ?? key.consolRefId;
-    const docRefItem  = key.DOC_REF_ITEM  ?? key.docRefItem;
+    const docRefItem = key.DOC_REF_ITEM ?? key.docRefItem;
 
     if (!consolRefId) { req.error(400, 'CONSOL_REF_ID is required.'); return; }
     if (docRefItem === undefined || docRefItem === null) {
@@ -30,14 +39,16 @@ module.exports = function createLineItemPatchHandler(scenarioCode) {
 
     const db = await cds.connect.to('db');
     const actor = req?.user?.id || req?.user?.attr?.user_name || 'SYSTEM';
+
     const existing = await db.run(
       SELECT.one.from(EntityNames.CONSOLIDATION_LINE_ITEM)
-        .columns('CONSOL_REF_ID','DOC_REF_ITEM','POSTING_STATUS','DOCUMENT_TYPE')
+        .columns('CONSOL_REF_ID', 'DOC_REF_ITEM', 'STATUS_CODE', 'DOCUMENT_TYPE')
         .where({ CONSOL_REF_ID: consolRefId, DOC_REF_ITEM: docRefItem })
     );
 
     if (!existing) { req.error(404, `Line item ${consolRefId}/${docRefItem} not found.`); return; }
-    if (String(existing.POSTING_STATUS) === POSTED) {
+
+    if (String(existing.STATUS_CODE) === SC_POSTED) {
       req.error(409, 'Line item belongs to a POSTED document and cannot be modified.');
       return;
     }
@@ -68,9 +79,8 @@ module.exports = function createLineItemPatchHandler(scenarioCode) {
         .where({ CONSOL_REF_ID: consolRefId, DOC_REF_ITEM: docRefItem })
     );
 
-    // NEW: Log PATCH to audit table (per-record detail for minor changes)
     await auditRepo.updatePatchAudit({
-      auditId: null, // no parent audit row required; creates dedicated PATCH audit entry
+      auditId: null,
       consolRefId,
       docRefItem,
       changedFields,

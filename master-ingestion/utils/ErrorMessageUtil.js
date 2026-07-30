@@ -1,11 +1,3 @@
-/**
- * Layman-friendly error messages for master ingestion.
- *
- * Error rows aggregate ALL errors per record (not just the first), so
- * the summary/list text lists every error. Codes are 2-digit (see Constants
- * and StatusCodeUtil); both code and text are shown in the text error file
- * and in MOBI_DB_AUDIT.ERROR_DETAIL.
- */
 const StatusCodeUtil = require('./StatusCodeUtil');
 const Constants = require('./Constants');
 
@@ -19,40 +11,37 @@ const CODE_FRIENDLY = {
   '07': 'Duplicate file',
   '05': 'Business partner already exists in the system',
   '06': 'Same BP ID exists under a different company code',
-  '25': 'CSV header is missing required columns'
+  '25': 'CSV header is missing required columns',
+  '013': 'The uploaded CSV file contains only headers without any data records. Please include at least one valid record and re-upload.'
 };
 
 class ErrorMessageUtil {
   static generateFileErrorSummary(errorRows, totalRows, validCount, errorCount) {
     if (!errorRows || !errorRows.length) return '';
-
     const byCode = new Map();
     for (const err of errorRows) {
-      const codes = String(err.errorCode || '').split(',').map((c) => c.trim()).filter(Boolean);
+      const codes = String(err.errorCode || '')
+        .split(',')
+        .map((c) => c.trim())
+        .filter(Boolean);
       for (const code of codes) byCode.set(code, (byCode.get(code) || 0) + 1);
     }
-
     const parts = [];
     for (const [code, count] of byCode.entries()) {
-      const text = CODE_FRIENDLY[code] || StatusCodeUtil.toText('MASTER', code) || 'Validation error';
+      const text = CODE_FRIENDLY[code] || StatusCodeUtil.toText(code) || 'Validation error';
       parts.push(`${count} record(s) - [${code}] ${text}`);
     }
-
     const summary = parts.join('; ');
-    return (summary.length > 255 ? summary.substring(0, 252) + '...' : summary);
+    return summary.length > 255 ? summary.substring(0, 252) + '...' : summary;
   }
 
   static getFriendlyMessage(errorCode, technicalDetail = '') {
     if (CODE_FRIENDLY[errorCode]) return CODE_FRIENDLY[errorCode];
-    const fromMap = StatusCodeUtil.toText('MASTER', errorCode);
+    const fromMap = StatusCodeUtil.toText(errorCode);
     if (fromMap && fromMap !== errorCode) return fromMap;
     return technicalDetail || 'Validation error';
   }
 
-  /**
-   * Aggregate errors for a single record into a single line for the text
-   * error file. Example: "[08] Mandatory field COUNTRY_CODE missing; [13] Invalid country code XX"
-   */
   static aggregateRecordErrors(errors) {
     if (!errors || !errors.length) return '';
     return errors.map((e) => `[${e.code || 'XX'}] ${e.message}`).join('; ');
@@ -62,7 +51,10 @@ class ErrorMessageUtil {
     if (!errorRows || !errorRows.length) return '';
     const byCode = new Map();
     for (const err of errorRows) {
-      const codes = String(err.errorCode || '').split(',').map((c) => c.trim()).filter(Boolean);
+      const codes = String(err.errorCode || '')
+        .split(',')
+        .map((c) => c.trim())
+        .filter(Boolean);
       for (const code of codes) byCode.set(code, (byCode.get(code) || 0) + 1);
     }
     const parts = [];

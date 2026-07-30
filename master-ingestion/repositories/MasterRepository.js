@@ -14,36 +14,45 @@ class MasterRepository {
 
   async updateMasterStatus(payload) {
     const db = await cds.connect.to('db');
+    const bp = String(payload.BP_NUMBER || '').trim();
+    const isSuccess = (bp.length > 0 && bp.toLowerCase() !== 'null') || payload.STATUS_CODE === '063';
+    const statusCode = isSuccess ? '063' : (payload.STATUS_CODE || '100');
     return db.run(
-        UPDATE('mobi.db.MOBI_DB_MASTER')
-            .set({
-                BP_NUMBER:      payload.BP_NUMBER,
-                POSTING_STATUS: payload.POSTING_STATUS,
-                ERROR_DETAIL:   payload.ERROR_DETAIL,
-                STATUS_CODE:    payload.STATUS_CODE || payload.POSTING_STATUS,
-                ERROR_CODE:     payload.ERROR_CODE
-            })
-            .where({ ID: payload.ID })
+      UPDATE('mobi.db.MOBI_DB_MASTER')
+        .set({
+          BP_NUMBER: payload.BP_NUMBER,
+          POSTING_STATUS: payload.POSTING_STATUS || statusCode,
+          ERROR_DETAIL: payload.ERROR_DETAIL || '',
+          STATUS_CODE: statusCode,
+          ERROR_CODE: payload.ERROR_CODE || '',
+          CHANGED_BY: ''
+        })
+        .where({ ID: payload.ID })
     );
   }
 
   async updateMasterStatusBatch(items) {
     const db = await cds.connect.to('db');
     return db.tx(async tx => {
-        const promises = items.map(item => 
-            tx.run(UPDATE('mobi.db.MOBI_DB_MASTER')
-                .set({
-                    BP_NUMBER:      item.BP_NUMBER,
-                    POSTING_STATUS: item.POSTING_STATUS,
-                    ERROR_DETAIL:   item.ERROR_DETAIL,
-                    STATUS_CODE:    item.STATUS_CODE || item.POSTING_STATUS,
-                    ERROR_CODE:     item.ERROR_CODE
-                })
-                .where({ ID: item.ID })
-            )
+      const promises = items.map(item => {
+        const bp = String(item.BP_NUMBER || '').trim();
+        const isSuccess = (bp.length > 0 && bp.toLowerCase() !== 'null') || item.STATUS_CODE === '063';
+        const statusCode = isSuccess ? '063' : (item.STATUS_CODE || '100');
+        return tx.run(
+          UPDATE('mobi.db.MOBI_DB_MASTER')
+            .set({
+              BP_NUMBER: item.BP_NUMBER,
+              POSTING_STATUS: item.POSTING_STATUS || statusCode,
+              ERROR_DETAIL: item.ERROR_DETAIL || '',
+              STATUS_CODE: statusCode,
+              ERROR_CODE: item.ERROR_CODE || '',
+              CHANGED_BY: ''
+            })
+            .where({ ID: item.ID })
         );
-        const results = await Promise.all(promises);
-        return results.reduce((acc, cur) => acc + cur, 0);
+      });
+      const results = await Promise.all(promises);
+      return results.reduce((acc, cur) => acc + cur, 0);
     });
   }
 
@@ -63,26 +72,34 @@ class MasterRepository {
     const uniqueIds = [...new Set((ids || []).filter(Boolean))];
     if (!uniqueIds.length) return [];
     const db = await cds.connect.to('db');
-    return db.run(SELECT.from('mobi.db.MOBI_DB_MASTER').where({
-      ID: { in: uniqueIds }, ACTIVE_FLAG: Constants.ACTIVE_FLAG
-    }));
+    return db.run(
+      SELECT.from('mobi.db.MOBI_DB_MASTER').where({
+        ID: { in: uniqueIds },
+        ACTIVE_FLAG: Constants.ACTIVE_FLAG
+      })
+    );
   }
 
   async buildExistingKeySet(ids) {
-    const uniqueIds = [...new Set((ids || []).filter(Boolean).map((id) => String(id).trim().toUpperCase()))];
+    const uniqueIds = [...new Set((ids || []).filter(Boolean).map(id => String(id).trim().toUpperCase()))];
     if (!uniqueIds.length) return new Set();
     const db = await cds.connect.to('db');
     const rows = await db.run(
       SELECT.from('mobi.db.MOBI_DB_MASTER')
         .columns('MOBI_PORTAL_CODE', 'SAP_COMPANY_CODE', 'ID')
-        .where({ ID: { in: uniqueIds }, ACTIVE_FLAG: Constants.ACTIVE_FLAG })
+        .where({ ID: { in: uniqueIds } })
     );
     const keySet = new Set();
     for (const r of rows || []) {
-      const portal  = String(r.MOBI_PORTAL_CODE || '').trim().toUpperCase();
+      const portal = String(r.MOBI_PORTAL_CODE || '').trim().toUpperCase();
       const company = String(r.SAP_COMPANY_CODE || '').trim();
-      const id      = String(r.ID || '').trim().toUpperCase();
-      keySet.add(`${portal}|${company}|${id}`);
+      const id = String(r.ID || '').trim().toUpperCase();
+      if (id) {
+        keySet.add(id);
+        if (portal && company) {
+          keySet.add(`${portal}|${company}|${id}`);
+        }
+      }
     }
     return keySet;
   }

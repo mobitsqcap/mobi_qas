@@ -4,7 +4,7 @@
 
     <Dialog
         id="helpDialog"
-        title="GLV Control Table - Help"
+        title="GLValueLookup - Help"
         contentWidth="700px"
         contentHeight="550px"
         draggable="true"
@@ -150,6 +150,10 @@
                     <Text text="• Invalid Host - Host name is not maintained in the system."/>
 
                     <Text text="• Validation errors are highlighted in the Status column."/>
+
+                     <Text text="• A - Refers to Active Record in DB."/>
+
+                     <Text text="• I - Refers to InActive Record in DB."/>
 
                     <Toolbar class="sapUiSmallMarginTop"/>
 

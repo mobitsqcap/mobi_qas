@@ -13,7 +13,6 @@ class MasterCsvService {
 
   parse(buffer, existingIdKeys = new Set()) {
     const { headers, rows } = CsvUtil.parseNormalized(buffer);
-
     try {
       this._validateHeaders(headers);
     } catch (error) {
@@ -23,9 +22,23 @@ class MasterCsvService {
       throw error;
     }
 
+    // REQUIREMENT: If the file has only headers without any data rows (empty file),
+    // reject it immediately with EMPTY_FILE (013) so it moves to ERROR folder
+    // and logs exact error details in MOBI_DB_FILELOG and MOBI_DB_AUDIT.
+    if (!rows || rows.length === 0) {
+      const error = new ValidationError(
+        StatusCodeUtil.toCode('EMPTY_FILE', '013'),
+        'The uploaded CSV file contains only headers without any data records. Please include at least one valid record and re-upload.'
+      );
+      error.code = '013'; // EMPTY_FILE
+      error.totalRows = 0;
+      error.validCount = 0;
+      error.errorCount = 0;
+      throw error;
+    }
+
     const records = rows.map((r, index) => MasterRecord.fromCsvRow(r, index + 2));
     const { validRecords, errorRows } = this.validator.validateRecords(records, { existingIdKeys });
-
     return {
       totalRows: rows.length,
       records: validRecords,

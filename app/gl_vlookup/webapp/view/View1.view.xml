@@ -31,7 +31,7 @@
                     justifyContent="Center">
 
                     <Title
-                        text="GLVValueLookup"
+                        text="GLValueLookup"
                         level="H1"/>
 
                 </HBox>

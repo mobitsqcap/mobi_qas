@@ -1,20 +1,20 @@
 const cds = require('@sap/cds');
 const { v4: uuid } = require('uuid');
-const Constants           = require('../master-ingestion/utils/Constants');
-const StatusCodeUtil      = require('../master-ingestion/utils/StatusCodeUtil');
- 
-const SftpService         = require('../master-ingestion/services/SftpService');
-const MasterCsvService    = require('../master-ingestion/services/MasterCsvService');
+const Constants = require('../master-ingestion/utils/Constants');
+const StatusCodeUtil = require('../master-ingestion/utils/StatusCodeUtil');
+
+const SftpService = require('../master-ingestion/services/SftpService');
+const MasterCsvService = require('../master-ingestion/services/MasterCsvService');
 const MasterUpsertService = require('../master-ingestion/services/MasterUpsertService');
-const FileHashService     = require('../master-ingestion/services/FileHashService');
- 
-const MasterRepository    = require('../master-ingestion/repositories/MasterRepository');
-const FileLogRepository   = require('../master-ingestion/repositories/FileLogRepository');
-const AuditRepository     = require('../master-ingestion/repositories/AuditRepository');
- 
-const ErrorFileHandler        = require('../master-ingestion/handlers/ErrorFileHandler');
-const SuccessFileHandler      = require('../master-ingestion/handlers/SuccessFileHandler');
-const MasterFileHandler       = require('../master-ingestion/handlers/MasterFileHandler');
+const FileHashService = require('../master-ingestion/services/FileHashService');
+
+const MasterRepository = require('../master-ingestion/repositories/MasterRepository');
+const FileLogRepository = require('../master-ingestion/repositories/FileLogRepository');
+const AuditRepository = require('../master-ingestion/repositories/AuditRepository');
+
+const ErrorFileHandler = require('../master-ingestion/handlers/ErrorFileHandler');
+const SuccessFileHandler = require('../master-ingestion/handlers/SuccessFileHandler');
+const MasterFileHandler = require('../master-ingestion/handlers/MasterFileHandler');
 const UnifiedIngestionHandler = require('../master-ingestion/handlers/UnifiedIngestionHandler');
 
 module.exports = cds.service.impl(async function () {
@@ -23,28 +23,25 @@ module.exports = cds.service.impl(async function () {
   // ---------------------------------------------------------------
   // Repositories
   // ---------------------------------------------------------------
-  const masterRepository  = new MasterRepository();
+  const masterRepository = new MasterRepository();
   const fileLogRepository = new FileLogRepository();
-  const auditRepository   = new AuditRepository();
+  const auditRepository = new AuditRepository();
 
   // ---------------------------------------------------------------
   // Services
   // ---------------------------------------------------------------
-  // ONE shared SftpService instance - it caches the destination config and
-  // the live connection, so every handler must receive THIS instance.
-  const sftpService         = new SftpService();
-  const masterCsvService    = new MasterCsvService();
+  const sftpService = new SftpService();
+  const masterCsvService = new MasterCsvService();
   const masterUpsertService = new MasterUpsertService(masterRepository);
-  const fileHashService     = new FileHashService(fileLogRepository);
+  const fileHashService = new FileHashService(fileLogRepository);
 
   // ---------------------------------------------------------------
   // Handlers
   // ---------------------------------------------------------------
-  const errorFileHandler   = new ErrorFileHandler(sftpService);
+  const errorFileHandler = new ErrorFileHandler(sftpService);
   const successFileHandler = new SuccessFileHandler(sftpService);
-
   const masterFileHandler = new MasterFileHandler({
-    sftpService,                       // <-- required by BaseFileHandler
+    sftpService,
     fileHashService,
     csvService: masterCsvService,
     masterUpsertService,
@@ -58,7 +55,7 @@ module.exports = cds.service.impl(async function () {
   });
 
   const unifiedIngestionHandler = new UnifiedIngestionHandler({
-    sftpService,                         
+    sftpService,
     errorFileHandler,
     fileLogRepository,
     auditRepository,
@@ -79,7 +76,6 @@ module.exports = cds.service.impl(async function () {
     sftpService.clearTrace();
     const runId = uuid();
     const actor = actorOf(req);
-
     try {
       const result = await unifiedIngestionHandler.handle({ actor, runId });
       return {
@@ -95,65 +91,53 @@ module.exports = cds.service.impl(async function () {
         logs: [...sftpService.getTrace(), `Master ingestion failed: ${error.message}`]
       };
     } finally {
-      try { await sftpService.disconnect(); } catch (_) { /* ignore */ }
+      try {
+        await sftpService.disconnect();
+      } catch (_) {
+        /* ignore */
+      }
     }
   });
-  // Add this inside the cds.service.impl block in IngestionMasterService.js
 
-// this.on('replicateMasterStatusToAudit', async (req) => {
-//     const data = req.data || {};
-    
-//     if (!data.ID) {
-//         return req.error(400, "ID is required");
-//     }
-
-//     try {
-//         // 1. Update Master Table
-//         const masterUpdated = await masterRepository.updateMasterStatus(data);
-        
-//         // 2. Update Audit Table (Only if failure)
-//         const auditUpdated = await auditRepository.updateRecordAuditFromMaster(data);
-
-//         return {
-//             updated: masterUpdated || 1,
-//             message: `Master record ${data.ID} updated. Audit replication: ${auditUpdated ? 'Success' : 'Skipped/No Row'}`,
-//             merchantId: data.ID,
-//             BP_NUMBER: data.BP_NUMBER
-//         };
-//     } catch (err) {
-//         console.error('[IngestionMasterService] Error:', err);
-//         return req.error(500, `Failed to replicate: ${err.message}`);
-//     }
-// });
-this.on('replicateMasterStatusToAudit', async (req) => {
-    const items = req.data.items ;
-    if (!items.length) return { updatedCount: 0, message: "No items provided" };
-
-    try {
-        // 1. Bulk Update Master Table
-        const masterCount = await masterRepository.updateMasterStatusBatch(items);
-        
-        // 2. Bulk Update Audit Table (Failures only)
-        const auditCount = await auditRepository.updateRecordAuditFromMasterBatch(items);
-
-        return {
-            updatedCount: masterCount,
-            message: `Processed ${items.length} records. Master updated: ${masterCount}, Audit updated: ${auditCount}`
-        };
-    } catch (err) {
-        console.error('[IngestionMasterService] Batch Error:', err);
-        return req.error(500, `Batch update failed: ${err.message}`);
+  this.on('replicateMasterStatusToAudit', async (req) => {
+    const items = req.data?.items || [];
+    if (!items.length) {
+      return {
+        updated: 0,
+        updatedCount: 0,
+        message: 'No items provided',
+        merchantId: null,
+        BP_NUMBER: null
+      };
     }
-});
+    try {
+      // 1. Bulk Update Master Table (sets STATUS_CODE = '063' on success)
+      const masterCount = await masterRepository.updateMasterStatusBatch(items);
+
+      // 2. Create new rows in MOBI_DB_AUDIT (PROCESS_TYPE = 'CPI TO SAP', PROCESS_NAME = 'INTEGRATION', etc.)
+      const auditCount = await auditRepository.createRecordAuditFromCPIBatch(items);
+
+      return {
+        updated: masterCount,
+        updatedCount: masterCount,
+        message: `Processed ${items.length} records. Master updated: ${masterCount}, Audit rows created: ${auditCount}`,
+        merchantId: items[0]?.ID || null,
+        BP_NUMBER: items[0]?.BP_NUMBER || null
+      };
+    } catch (err) {
+      console.error('[IngestionMasterService] Batch Error:', err);
+      return req.error(500, `Batch update failed: ${err.message}`);
+    }
+  });
   this.on('lookupMerchant', async (req) => {
     const { portalCode, companyCode, merchantId } = req.data || {};
     const row = await masterRepository.findActive(portalCode, companyCode, merchantId);
     if (!row) return { found: false, countryCode: null, merchantName: null, activeFlag: null };
     return {
       found: true,
-      countryCode:  row.COUNTRY_CODE  || null,
-      merchantName: row.MASTER_NAME   || null,
-      activeFlag:   row.ACTIVE_FLAG   || null
+      countryCode: row.COUNTRY_CODE || null,
+      merchantName: row.MASTER_NAME || null,
+      activeFlag: row.ACTIVE_FLAG || null
     };
   });
 });

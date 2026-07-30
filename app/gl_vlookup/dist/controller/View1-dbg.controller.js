@@ -171,9 +171,14 @@ sap.ui.define([
                         var iRow = iIndex + 2;
 
                         var sCompanyCode = String(oRow["Company Code"] || "").trim();
-                        var sPaymentType = String(oRow["Payment Type"] || "").trim();
-                        var sPaymentSubType = String(oRow["Payment Sub Type"] || "").trim();
-                        var sHost = String(oRow["Host"] || "").trim();
+                        var sPaymentType = String(oRow["Payment Type"] || "").trim().toUpperCase();
+                        var sPaymentSubType = String(oRow["Payment Sub Type"] || "").trim().toUpperCase();
+                        var sHost = String(oRow["Host"] || "").trim().toUpperCase();
+
+                        // Update the row so the table displays the uppercase values
+                        oRow["Payment Type"] = sPaymentType;
+                        oRow["Payment Sub Type"] = sPaymentSubType;
+                        oRow["Host"] = sHost;
                         var sGLAccounts = String(oRow["GL Accounts"] || "").trim();
                         // Duplicate GL Account Validation
 
@@ -259,7 +264,7 @@ sap.ui.define([
 
                             );
                             bInvalid = true;
-                            oRow.Status = "Multiple X Found";
+                            oRow.Status = "Invalid combination of X";
                         }
                         // Mandatory Fields
                         if (!sCompanyCode) {
@@ -320,8 +325,8 @@ sap.ui.define([
 
                         // Payment Type
                         if (sPaymentType &&
-                            sPaymentType !== "Payins" &&
-                            sPaymentType !== "Payout") {
+                            sPaymentType !== "PAYINS" &&
+                            sPaymentType !== "PAYOUT") {
 
                             aErrors.push("Row " + iRow + ": Payment Type must be either Payins or Payout.");
                             bInvalid = true;
@@ -361,7 +366,7 @@ sap.ui.define([
                                 );
                                 bInvalid = true;
                                 // oRow.Status = "Invalid X Value";
-                                aRowErrors.push("Multiple X Found");
+                                aRowErrors.push("invalid combination of X");
                             }
 
                             if (field.value === "X") {
@@ -607,102 +612,102 @@ sap.ui.define([
 
             }
         },
-    onDisplayGLData: async function () {
+        onDisplayGLData: async function () {
 
-    try {
+            try {
 
-        var oModel = this.getOwnerComponent().getModel();
+                var oModel = this.getOwnerComponent().getModel();
 
-        var oAction = oModel.bindContext("/displayGLData(...)");
+                var oAction = oModel.bindContext("/displayGLData(...)");
 
-        await oAction.execute();
+                await oAction.execute();
 
-        var oResult = oAction.getBoundContext().getObject();
+                var oResult = oAction.getBoundContext().getObject();
 
-        var aRecords = oResult.value || oResult;
+                var aRecords = oResult.value || oResult;
 
-        var aTableData = aRecords.map(function (row) {
-            return {
-                "Company Code": row.COMPANY_CODE,
-                "Payment Type": row.PAYMENT_TYPE,
-                "Payment Sub Type": row.PAYMENT_SUB_TYPE,
-                "Host": row.HOST_NAME,
-                "transaction_amount": row.TXN_AMOUNT,
-                "host_mdr_amount": row.HOST_MDR_AMOUNT,
-                "host_fee_payable": row.HOST_FEE_PAYABLE,
-                "mobi_mdr_amount": row.MOBI_MDR_AMOUNT,
-                "mdr_revenue": row.MDR_REVENUE,
-                "GL Accounts": row.GL_Accounts,
-                "Status": row.Status
-            };
-        });
+                var aTableData = aRecords.map(function (row) {
+                    return {
+                        "Company Code": row.COMPANY_CODE,
+                        "Payment Type": row.PAYMENT_TYPE,
+                        "Payment Sub Type": row.PAYMENT_SUB_TYPE,
+                        "Host": row.HOST_NAME,
+                        "transaction_amount": row.TXN_AMOUNT,
+                        "host_mdr_amount": row.HOST_MDR_AMOUNT,
+                        "host_fee_payable": row.HOST_FEE_PAYABLE,
+                        "mobi_mdr_amount": row.MOBI_MDR_AMOUNT,
+                        "mdr_revenue": row.MDR_REVENUE,
+                        "GL Accounts": row.GL_Accounts,
+                        "Status": row.Status
+                    };
+                });
 
-        this.getView().getModel("tableModel").setProperty("/data", aTableData);
-this.byId("btnDownloadGL").setEnabled(true);
-        // Disable Upload button after displaying DB data
-        this.byId("btnHanaPush").setEnabled(false);
+                this.getView().getModel("tableModel").setProperty("/data", aTableData);
+                this.byId("btnDownloadGL").setEnabled(true);
+                // Disable Upload button after displaying DB data
+                this.byId("btnHanaPush").setEnabled(false);
 
-        sap.m.MessageToast.show("GL Data Loaded Successfully");
+                sap.m.MessageToast.show("GL Data Loaded Successfully");
 
-    } catch (e) {
+            } catch (e) {
 
-        console.error(e);
+                console.error(e);
 
-        sap.m.MessageToast.show("Unable to load GL Data");
+                sap.m.MessageToast.show("Unable to load GL Data");
 
-    }
+            }
 
-},
-onDownloadGLData: function () {
+        },
+        onDownloadGLData: function () {
 
-    var aData = this.getView()
-        .getModel("tableModel")
-        .getProperty("/data");
+            var aData = this.getView()
+                .getModel("tableModel")
+                .getProperty("/data");
 
-    if (!aData || aData.length === 0) {
-        sap.m.MessageBox.information("No GL Data available.");
-        return;
-    }
+            if (!aData || aData.length === 0) {
+                sap.m.MessageBox.information("No GL Data available.");
+                return;
+            }
 
-    // Arrange columns in required order
-    var aExcelData = aData.map(function (oRow) {
-        return {
-            "Company Code": oRow["Company Code"],
-            "Payment Type": oRow["Payment Type"],
-            "Payment Sub Type": oRow["Payment Sub Type"],
-            "Host": oRow["Host"],
-            "Transaction Amount": oRow["transaction_amount"],
-            "Host MDR Amount": oRow["host_mdr_amount"],
-            "Host Fee Payable": oRow["host_fee_payable"],
-            "Mobi MDR Amount": oRow["mobi_mdr_amount"],
-            "MDR Revenue": oRow["mdr_revenue"],
-            "GL Accounts": oRow["GL Accounts"],
-            "Status": oRow["Status"]
-        };
-    });
+            // Arrange columns in required order
+            var aExcelData = aData.map(function (oRow) {
+                return {
+                    "Company Code": oRow["Company Code"],
+                    "Payment Type": oRow["Payment Type"],
+                    "Payment Sub Type": oRow["Payment Sub Type"],
+                    "Host": oRow["Host"],
+                    "Transaction Amount": oRow["transaction_amount"],
+                    "Host MDR Amount": oRow["host_mdr_amount"],
+                    "Host Fee Payable": oRow["host_fee_payable"],
+                    "Mobi MDR Amount": oRow["mobi_mdr_amount"],
+                    "MDR Revenue": oRow["mdr_revenue"],
+                    "GL Accounts": oRow["GL Accounts"],
+                    "Status": oRow["Status"]
+                };
+            });
 
-    // Create worksheet
-    var oWorksheet = XLSX.utils.json_to_sheet(aExcelData);
+            // Create worksheet
+            var oWorksheet = XLSX.utils.json_to_sheet(aExcelData);
 
-    // Create workbook
-    var oWorkbook = XLSX.utils.book_new();
+            // Create workbook
+            var oWorkbook = XLSX.utils.book_new();
 
-    XLSX.utils.book_append_sheet(
-        oWorkbook,
-        oWorksheet,
-        "GL Data"
-    );
+            XLSX.utils.book_append_sheet(
+                oWorkbook,
+                oWorksheet,
+                "GL Data"
+            );
 
-    // Download Excel
-    XLSX.writeFile(
-        oWorkbook,
-        "GL_Data.xlsx"
-    );
+            // Download Excel
+            XLSX.writeFile(
+                oWorkbook,
+                "GL_Data.xlsx"
+            );
 
-    sap.m.MessageToast.show("GL Data downloaded successfully.");
-// Disable buttons after download
-this.byId("btnDownloadGL").setEnabled(false);
-this.byId("btnDisplay").setEnabled(false);
-}
+            sap.m.MessageToast.show("GL Data downloaded successfully.");
+            // Disable buttons after download
+            this.byId("btnDownloadGL").setEnabled(false);
+            this.byId("btnDisplay").setEnabled(false);
+        }
     });
 });

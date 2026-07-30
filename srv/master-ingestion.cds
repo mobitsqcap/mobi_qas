@@ -18,8 +18,7 @@ service IngestionMasterService {
         ID              : String(20);
         BP_NUMBER       : String(20);
         POSTING_STATUS  : String(2);
-        STATUS_CODE     : String(2);
-        ERROR_CODE      : String(10);
+        STATUS_CODE     : String(3);
         ERROR_DETAIL    : String(500);
     }
   ) returns {

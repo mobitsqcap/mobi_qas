@@ -1,65 +1,82 @@
+'use strict';
+
 const cds = require('@sap/cds');
-const { SELECT, INSERT, UPDATE } = cds.ql;
+const { UPSERT, UPDATE, SELECT, DELETE } = cds.ql;
+
 const DateUtil = require('../utils/DateUtil');
+const StatusCodeUtil = require('../utils/StatusCodeUtil');
+
+const ENTITY = 'mobi.db.MOBI_DB_FILEBATCH';
 
 class FileBatchRepository {
+  async clearForAttempt(auditId) {
+    const db = await cds.connect.to('db');
+    await db.run(DELETE.from(ENTITY).where({ AUDIT_ID: auditId }));
+  }
+
   async markStarted(auditId, batchNo, fileName, startIndex, endIndex, totalRecords) {
     const db = await cds.connect.to('db');
+    const code = StatusCodeUtil.toCode('PROCESSING');
     const now = DateUtil.nowTimestamp();
-    const existing = await db.run(SELECT.one.from('mobi.db.MOBI_DB_FILEBATCH').where({ AUDIT_ID: auditId, BATCH_NO: batchNo }));
-
-    const payload = {
-      STATUS: 'PROCESSING',
-      START_INDEX: startIndex,
-      END_INDEX: endIndex,
-      TOTAL_RECORDS: totalRecords,
-      START_TIME: now,
-      END_TIME: now,
-      ERROR_DETAIL: ''
-    };
-
-    if (existing) {
-      await db.run(UPDATE('mobi.db.MOBI_DB_FILEBATCH').set(payload).where({ AUDIT_ID: auditId, BATCH_NO: batchNo }));
-      return;
-    }
-
-    await db.run(INSERT.into('mobi.db.MOBI_DB_FILEBATCH').entries({
-      AUDIT_ID: auditId,
-      BATCH_NO: batchNo,
-      FILE_NAME: fileName,
-      SUCCESS_COUNT: 0,
-      ERROR_COUNT: 0,
-      ...payload
-    }));
+    await db.run(
+      UPSERT.into(ENTITY).entries({
+        AUDIT_ID: auditId,
+        BATCH_NO: batchNo,
+        FILE_NAME: fileName,
+        START_INDEX: startIndex,
+        END_INDEX: endIndex,
+        STATUS: StatusCodeUtil.toText(code),
+        STATUS_CODE: code,
+        TOTAL_RECORDS: totalRecords,
+        SUCCESS_COUNT: 0,
+        ERROR_COUNT: 0,
+        START_TIME: now,
+        END_TIME: null,
+        ERROR_DETAIL: ''
+      })
+    );
   }
 
   async markCompleted(auditId, batchNo, successCount, errorCount, errorDetail = '') {
     const db = await cds.connect.to('db');
-    const now = DateUtil.nowTimestamp();
-    const status = errorCount === 0 ? 'SUCCESS' : successCount === 0 ? 'FAILED' : 'PARTIAL';
-    await db.run(UPDATE('mobi.db.MOBI_DB_FILEBATCH').set({
-      STATUS: status,
-      SUCCESS_COUNT: successCount,
-      ERROR_COUNT: errorCount,
-      END_TIME: now,
-      ERROR_DETAIL: String(errorDetail || '').substring(0, 255)
-    }).where({ AUDIT_ID: auditId, BATCH_NO: batchNo }));
+    const statusName = errorCount === 0
+      ? 'SUCCESS'
+      : successCount === 0 ? 'FAILED' : 'PARTIALLY_COMPLETED';
+    const code = StatusCodeUtil.toCode(statusName);
+    await db.run(
+      UPDATE(ENTITY).set({
+        STATUS: StatusCodeUtil.toText(code),
+        STATUS_CODE: code,
+        SUCCESS_COUNT: successCount,
+        ERROR_COUNT: errorCount,
+        END_TIME: DateUtil.nowTimestamp(),
+        ERROR_DETAIL: String(errorDetail || '').slice(0, 255)
+      }).where({ AUDIT_ID: auditId, BATCH_NO: batchNo })
+    );
   }
 
-  async getCompletedBatchNos(auditId) {
+  async markAllFailed(auditId, errorDetail) {
     const db = await cds.connect.to('db');
-    const rows = await db.run(SELECT.from('mobi.db.MOBI_DB_FILEBATCH').columns('BATCH_NO').where({ AUDIT_ID: auditId, STATUS: 'SUCCESS' }));
-    return new Set((rows || []).map((row) => row.BATCH_NO));
+    const code = StatusCodeUtil.toCode('FAILED');
+    await db.run(
+      UPDATE(ENTITY).set({
+        STATUS: StatusCodeUtil.toText(code),
+        STATUS_CODE: code,
+        END_TIME: DateUtil.nowTimestamp(),
+        ERROR_DETAIL: String(errorDetail || '').slice(0, 255)
+      }).where({ AUDIT_ID: auditId })
+    );
   }
 
   async getSummary(auditId) {
     const db = await cds.connect.to('db');
-    const rows = await db.run(SELECT.from('mobi.db.MOBI_DB_FILEBATCH').columns('SUCCESS_COUNT', 'ERROR_COUNT').where({ AUDIT_ID: auditId }));
-    return (rows || []).reduce((summary, row) => {
-      summary.validCount += Number(row.SUCCESS_COUNT || 0);
-      summary.errorCount += Number(row.ERROR_COUNT || 0);
-      return summary;
-    }, { validCount: 0, errorCount: 0 });
+    const rows = await db.run(
+      SELECT.from(ENTITY).columns('SUCCESS_COUNT', 'ERROR_COUNT').where({ AUDIT_ID: auditId })
+    );
+    return (rows || []).reduce((summary, row) => ({
+      validCount: summary.validCount + Number(row.SUCCESS_COUNT || 0),
+      errorCount: summary.errorCount + Number(row.ERROR_COUNT || 0)
+    }), { validCount: 0, errorCount: 0 });
   }
 }
 

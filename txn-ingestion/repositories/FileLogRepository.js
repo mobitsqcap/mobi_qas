@@ -1,164 +1,179 @@
-// const cds = require('@sap/cds');
-// const { SELECT, INSERT, UPDATE } = cds.ql;
-// const { v4: uuid } = require('uuid');
-// const Constants = require('../utils/Constants');
-// const DateUtil = require('../utils/DateUtil');
-// const HashUtil = require('../utils/HashUtil');
-
-// class FileLogRepository {
-//   async createInitial(file, auditId, fileHash, sizeBytes) {
-//     const db = await cds.connect.to('db');
-//     const now = DateUtil.nowTimestamp();
-//     const record = {
-//       AUDIT_ID: auditId,
-//       FILE_ID: HashUtil.sha256(`${file.name}|${now}`),
-//       FILE_NAME: file.name,
-//       FILE_PATH: file.path,
-//       FILE_SIZE_BYTES: sizeBytes ?? 0,
-//       FILE_HASH: fileHash || '',
-//       ROW_COUNT_TOTAL: 0,
-//       ROW_COUNT_VALID: 0,
-//       ROW_COUNT_ERROR: 0,
-//       STATUS: Constants.FILE_STATUS.RECEIVED,
-//       ERROR_DETAIL: '',
-//       RECEIVED_AT: now,
-//       PROCESS_START_AT: now,
-//       PROCESS_END_AT: now,
-//       CREATED_BY: Constants.SYSTEM_USERS.SFTP,
-//       CREATED_TIMESTAMP: now,
-//       CHANGED_BY: Constants.SYSTEM_USERS.SFTP,
-//       CHANGED_TIMESTAMP: now
-//     };
-//     await db.run(INSERT.into('mobi.db.MOBI_DB_FILELOG').entries(record));
-//     return record;
-//   }
-
-//   async ensureTracked(file) {
-//     const existing = await this.findLatestRetryableByFile(file);
-//     return existing || this.createInitial(file, uuid(), '', file.sizeBytes ?? 0);
-//   }
-
-//   async findLatestRetryableByFile(file) {
-//     const db = await cds.connect.to('db');
-//     const rows = await db.run(SELECT.from('mobi.db.MOBI_DB_FILELOG').where({
-//       FILE_NAME: file.name,
-//       STATUS: { in: [
-//         Constants.FILE_STATUS.RECEIVED,
-//         Constants.FILE_STATUS.PROCESSING,
-//         Constants.FILE_STATUS.FAILED,
-//         Constants.FILE_STATUS.PARTIALLY_PROCESSED
-//       ] }
-//     }));
-
-//     return (rows || [])
-//       .filter((row) => {
-//         const storedPath = String(row.FILE_PATH || '').toLowerCase();
-//         return storedPath === file.path || (!storedPath.includes('/fileout/') && !storedPath.includes('/file_out/'));
-//       })
-//       .sort((a, b) => new Date(b.CREATED_TIMESTAMP || 0) - new Date(a.CREATED_TIMESTAMP || 0))[0] || null;
-//   }
-
-//   async findByHash(hash) {
-//     const db = await cds.connect.to('db');
-//     return db.run(SELECT.one.from('mobi.db.MOBI_DB_FILELOG').where({ FILE_HASH: hash }));
-//   }
-
-//   async markPicked(auditId, details) {
-//     const db = await cds.connect.to('db');
-//     const now = DateUtil.nowTimestamp();
-//     await db.run(UPDATE('mobi.db.MOBI_DB_FILELOG').set({
-//       FILE_PATH: details.filePath,
-//       FILE_HASH: details.fileHash || '',
-//       FILE_SIZE_BYTES: details.sizeBytes ?? 0,
-//       ROW_COUNT_TOTAL: details.totalRows ?? 0,
-//       ROW_COUNT_VALID: details.validCount ?? 0,
-//       ROW_COUNT_ERROR: details.errorCount ?? 0,
-//       STATUS: Constants.FILE_STATUS.PROCESSING,
-//       PROCESS_START_AT: now,
-//       CHANGED_BY: Constants.SYSTEM_USERS.SFTP,
-//       CHANGED_TIMESTAMP: now
-//     }).where({ AUDIT_ID: auditId }));
-//   }
-
-//   async updateResult(auditId, result, fileHash, changedBy, filePath, options = {}) {
-//     const db = await cds.connect.to('db');
-//     const now = DateUtil.nowTimestamp();
-//     const status = options.statusOverride || this._resolveFinalStatus(result.validCount, result.errorCount);
-//     const payload = {
-//       FILE_HASH: fileHash || '',
-//       ROW_COUNT_TOTAL: result.totalRows ?? 0,
-//       ROW_COUNT_VALID: result.validCount ?? 0,
-//       ROW_COUNT_ERROR: result.errorCount ?? 0,
-//       STATUS: status,
-//       ERROR_DETAIL: String(options.errorDetail || '').substring(0, 255),
-//       PROCESS_END_AT: now,
-//       CHANGED_BY: Constants.SYSTEM_USERS.SFTP,
-//       CHANGED_TIMESTAMP: now
-//     };
-//     if (filePath !== undefined) payload.FILE_PATH = filePath;
-//     await db.run(UPDATE('mobi.db.MOBI_DB_FILELOG').set(payload).where({ AUDIT_ID: auditId }));
-//   }
-
-//   _resolveFinalStatus(validCount = 0, errorCount = 0) {
-//     if (validCount > 0 && errorCount > 0) return Constants.FILE_STATUS.PARTIALLY_PROCESSED;
-//     if (validCount > 0) return Constants.FILE_STATUS.COMPLETED;
-//     return Constants.FILE_STATUS.FAILED;
-//   }
-
-//   async markFailed(auditId, errorDetail, changedBy, details = {}) {
-//     const db = await cds.connect.to('db');
-//     const now = DateUtil.nowTimestamp();
-//     const payload = {
-//       STATUS: Constants.FILE_STATUS.FAILED,
-//       ERROR_DETAIL: String(errorDetail || '').substring(0, 255),
-//       PROCESS_START_AT: now,
-//       PROCESS_END_AT: now,
-//       CHANGED_BY: Constants.SYSTEM_USERS.SFTP,
-//       CHANGED_TIMESTAMP: now
-//     };
-//     if (details.filePath !== undefined) payload.FILE_PATH = details.filePath;
-//     if (details.fileHash !== undefined) payload.FILE_HASH = details.fileHash;
-//     if (details.sizeBytes !== undefined) payload.FILE_SIZE_BYTES = details.sizeBytes;
-//     if (details.totalRows !== undefined) payload.ROW_COUNT_TOTAL = details.totalRows;
-//     if (details.validCount !== undefined) payload.ROW_COUNT_VALID = details.validCount;
-//     if (details.errorCount !== undefined) payload.ROW_COUNT_ERROR = details.errorCount;
-//     await db.run(UPDATE('mobi.db.MOBI_DB_FILELOG').set(payload).where({ AUDIT_ID: auditId }));
-//   }
-// }
-
-// module.exports = FileLogRepository;
-
+'use strict';
 
 const cds = require('@sap/cds');
 const { SELECT, INSERT, UPDATE } = cds.ql;
+
 const { v4: uuid } = require('uuid');
-const Constants = require('../utils/Constants');
+
 const DateUtil = require('../utils/DateUtil');
 const HashUtil = require('../utils/HashUtil');
+const StatusCodeUtil = require('../utils/StatusCodeUtil');
+
+const ENTITY = 'mobi.db.MOBI_DB_FILELOG';
+const USER = 'SYSTEM_SFTP';
 
 class FileLogRepository {
-  async createInitial(file, auditId, fileHash, sizeBytes) {
+  async createInitial(file, auditId = uuid(), fileHash = '', sizeBytes = 0) {
     const db = await cds.connect.to('db');
     const now = DateUtil.nowTimestamp();
-    const record = { AUDIT_ID: auditId, FILE_ID: HashUtil.sha256(`${file.name}|${now}`), FILE_NAME: file.name, FILE_PATH: file.path, FILE_SIZE_BYTES: sizeBytes ?? 0, FILE_HASH: fileHash || '', ROW_COUNT_TOTAL: 0, ROW_COUNT_VALID: 0, ROW_COUNT_ERROR: 0, STATUS: Constants.FILE_STATUS.RECEIVED, ERROR_DETAIL: '', RECEIVED_AT: now, PROCESS_START_AT: now, PROCESS_END_AT: now, CREATED_BY: Constants.SYSTEM_USERS.SFTP, CREATED_TIMESTAMP: now, CHANGED_BY: Constants.SYSTEM_USERS.SFTP, CHANGED_TIMESTAMP: now };
-    await db.run(INSERT.into('mobi.db.MOBI_DB_FILELOG').entries(record));
+    const code = StatusCodeUtil.toCode('FILE_RECEIVED');
+
+    const record = {
+      AUDIT_ID: auditId,
+      FILE_ID: HashUtil.sha256(`${file.name}|${auditId}`),
+      FILE_NAME: file.name,
+      FILE_PATH: file.path,
+      FILE_SIZE_BYTES: sizeBytes ?? 0,
+      FILE_HASH: fileHash,
+      ROW_COUNT_TOTAL: 0,
+      ROW_COUNT_VALID: 0,
+      ROW_COUNT_ERROR: 0,
+      STATUS: StatusCodeUtil.toText(code),
+      STATUS_CODE: code,
+      ERROR_CODE: '',
+      ERROR_DETAIL: '',
+      RECEIVED_AT: now,
+      PROCESS_START_AT: null,
+      PROCESS_END_AT: null,
+      CREATED_BY: USER,
+      CREATED_TIMESTAMP: now,
+      CHANGED_BY: '',
+      CHANGED_TIMESTAMP: null
+    };
+
+    await db.run(INSERT.into(ENTITY).entries(record));
     return record;
   }
-  async createNewAttempt(file) { return this.createInitial(file, uuid(), '', file.sizeBytes ?? 0); }
-  async ensureTracked(file) { return (await this.findLatestRetryableByFile(file)) || this.createNewAttempt(file); }
+
+  async createNewAttempt(file) {
+    return this.createInitial(file, uuid(), '', file.sizeBytes ?? 0);
+  }
+
+  async ensureTracked(file) {
+    const existing = await this.findLatestRetryableByFile(file);
+    return existing || this.createInitial(file);
+  }
+
   async hasAnyFileName(fileName) {
     const db = await cds.connect.to('db');
-    return !!(await db.run(SELECT.one.from('mobi.db.MOBI_DB_FILELOG').columns('AUDIT_ID').where({ FILE_NAME: fileName })));
+    const row = await db.run(
+      SELECT.one.from(ENTITY).columns('AUDIT_ID').where({ FILE_NAME: fileName })
+    );
+    return Boolean(row);
   }
+
   async findLatestRetryableByFile(file) {
     const db = await cds.connect.to('db');
-    const rows = await db.run(SELECT.from('mobi.db.MOBI_DB_FILELOG').where({ FILE_NAME: file.name, STATUS: { in: [Constants.FILE_STATUS.RECEIVED, Constants.FILE_STATUS.PROCESSING, Constants.FILE_STATUS.FAILED, Constants.FILE_STATUS.PARTIALLY_PROCESSED] } }));
-    return (rows || []).filter((row) => { const storedPath = String(row.FILE_PATH || '').toLowerCase(); return storedPath === file.path || (!storedPath.includes('/fileout/') && !storedPath.includes('/file_out/')); }).sort((a, b) => new Date(b.CREATED_TIMESTAMP || 0) - new Date(a.CREATED_TIMESTAMP || 0))[0] || null;
+    const retryable = [
+      StatusCodeUtil.toCode('FILE_RECEIVED'),
+      StatusCodeUtil.toCode('PROCESSING'),
+      StatusCodeUtil.toCode('FAILED')
+    ];
+    const rows = await db.run(
+      SELECT.from(ENTITY).where({ FILE_NAME: file.name, STATUS_CODE: { in: retryable } })
+    );
+    return (rows || [])
+      .filter((row) => {
+        const stored = String(row.FILE_PATH || '').toLowerCase();
+        const current = String(file.path || '').toLowerCase();
+        return stored === current || (!stored.includes('/fileout/') && !stored.includes('/file_out/'));
+      })
+      .sort((a, b) => new Date(b.CREATED_TIMESTAMP || 0) - new Date(a.CREATED_TIMESTAMP || 0))[0] || null;
   }
-  async findByHash(hash) { const db = await cds.connect.to('db'); return db.run(SELECT.one.from('mobi.db.MOBI_DB_FILELOG').where({ FILE_HASH: hash })); }
-  async markPicked(auditId, details) { const db = await cds.connect.to('db'); const now = DateUtil.nowTimestamp(); await db.run(UPDATE('mobi.db.MOBI_DB_FILELOG').set({ FILE_PATH: details.filePath, FILE_HASH: details.fileHash || '', FILE_SIZE_BYTES: details.sizeBytes ?? 0, ROW_COUNT_TOTAL: details.totalRows ?? 0, ROW_COUNT_VALID: details.validCount ?? 0, ROW_COUNT_ERROR: details.errorCount ?? 0, STATUS: Constants.FILE_STATUS.PROCESSING, PROCESS_START_AT: now, CHANGED_BY: Constants.SYSTEM_USERS.SFTP, CHANGED_TIMESTAMP: now }).where({ AUDIT_ID: auditId })); }
-  async updateResult(auditId, result, fileHash, changedBy, filePath, options = {}) { const db = await cds.connect.to('db'); const now = DateUtil.nowTimestamp(); const status = options.statusOverride || this._resolveFinalStatus(result.validCount, result.errorCount); const payload = { FILE_HASH: fileHash || '', ROW_COUNT_TOTAL: result.totalRows ?? 0, ROW_COUNT_VALID: result.validCount ?? 0, ROW_COUNT_ERROR: result.errorCount ?? 0, STATUS: status, ERROR_DETAIL: String(options.errorDetail || '').substring(0, 255), PROCESS_END_AT: now, CHANGED_BY: changedBy || Constants.SYSTEM_USERS.SFTP, CHANGED_TIMESTAMP: now }; if (filePath !== undefined) payload.FILE_PATH = filePath; await db.run(UPDATE('mobi.db.MOBI_DB_FILELOG').set(payload).where({ AUDIT_ID: auditId })); }
-  _resolveFinalStatus(validCount = 0, errorCount = 0) { if (validCount > 0 && errorCount > 0) return Constants.FILE_STATUS.PARTIALLY_PROCESSED; if (validCount > 0) return Constants.FILE_STATUS.COMPLETED; return Constants.FILE_STATUS.FAILED; }
-  async markFailed(auditId, errorDetail, changedBy, details = {}) { const db = await cds.connect.to('db'); const now = DateUtil.nowTimestamp(); const payload = { STATUS: Constants.FILE_STATUS.FAILED, ERROR_DETAIL: String(errorDetail || '').substring(0, 255), PROCESS_START_AT: now, PROCESS_END_AT: now, CHANGED_BY: changedBy || Constants.SYSTEM_USERS.SFTP, CHANGED_TIMESTAMP: now, ...Object.fromEntries(Object.entries({ FILE_PATH: details.filePath, FILE_HASH: details.fileHash, FILE_SIZE_BYTES: details.sizeBytes, ROW_COUNT_TOTAL: details.totalRows, ROW_COUNT_VALID: details.validCount, ROW_COUNT_ERROR: details.errorCount }).filter(([, value]) => value !== undefined)) }; await db.run(UPDATE('mobi.db.MOBI_DB_FILELOG').set(payload).where({ AUDIT_ID: auditId })); }
+
+  async findByHash(hash) {
+    if (!hash) return null;
+    const db = await cds.connect.to('db');
+    return db.run(SELECT.one.from(ENTITY).where({ FILE_HASH: hash }));
+  }
+
+  async markPicked(auditId, details = {}) {
+    const db = await cds.connect.to('db');
+    const now = DateUtil.nowTimestamp();
+    const code = StatusCodeUtil.toCode('PROCESSING');
+    await db.run(
+      UPDATE(ENTITY).set({
+        FILE_PATH: details.filePath,
+        FILE_HASH: details.fileHash || '',
+        FILE_SIZE_BYTES: details.sizeBytes ?? 0,
+        ROW_COUNT_TOTAL: details.totalRows ?? 0,
+        ROW_COUNT_VALID: details.validCount ?? 0,
+        ROW_COUNT_ERROR: details.errorCount ?? 0,
+        STATUS: StatusCodeUtil.toText(code),
+        STATUS_CODE: code,
+        ERROR_CODE: '',
+        ERROR_DETAIL: '',
+        PROCESS_START_AT: now,
+        PROCESS_END_AT: null,
+        CHANGED_BY: details.changedBy || '',
+        CHANGED_TIMESTAMP: null
+      }).where({ AUDIT_ID: auditId })
+    );
+  }
+
+  async updateProgress(auditId, result = {}) {
+    const db = await cds.connect.to('db');
+    await db.run(
+      UPDATE(ENTITY).set({
+        ROW_COUNT_TOTAL: result.totalRows ?? 0,
+        ROW_COUNT_VALID: result.validCount ?? 0,
+        ROW_COUNT_ERROR: result.errorCount ?? 0,
+        CHANGED_BY: result.changedBy || '',
+        CHANGED_TIMESTAMP: null
+      }).where({ AUDIT_ID: auditId })
+    );
+  }
+
+  async updateResult(auditId, result, fileHash, changedBy, filePath, options = {}) {
+    const db = await cds.connect.to('db');
+    const statusCode = StatusCodeUtil.normalizeCode(
+      options.statusCode || (Number(result.errorCount || 0) ? 'FAILED' : 'COMPLETED'),
+      'UNKNOWN_ERROR'
+    );
+
+    const payload = {
+      FILE_HASH: fileHash || '',
+      ROW_COUNT_TOTAL: result.totalRows ?? 0,
+      ROW_COUNT_VALID: result.validCount ?? 0,
+      ROW_COUNT_ERROR: result.errorCount ?? 0,
+      STATUS: StatusCodeUtil.toText(statusCode),
+      STATUS_CODE: statusCode,
+      ERROR_CODE: options.errorCode ? StatusCodeUtil.normalizeCode(options.errorCode) : '',
+      ERROR_DETAIL: String(options.errorDetail || '').slice(0, 500),
+      PROCESS_END_AT: DateUtil.nowTimestamp(),
+      CHANGED_BY: changedBy || '',
+      CHANGED_TIMESTAMP: null
+    };
+
+    if (filePath !== undefined) payload.FILE_PATH = filePath;
+    await db.run(UPDATE(ENTITY).set(payload).where({ AUDIT_ID: auditId }));
+  }
+
+  async markFailed(auditId, errorDetail, changedBy, details = {}) {
+    const db = await cds.connect.to('db');
+    const now = DateUtil.nowTimestamp();
+    const failed = StatusCodeUtil.toCode('FAILED');
+
+    const payload = {
+      STATUS: StatusCodeUtil.toText(failed),
+      STATUS_CODE: failed,
+      ERROR_CODE: StatusCodeUtil.normalizeCode(details.errorCode, 'UNKNOWN_ERROR'),
+      ERROR_DETAIL: String(errorDetail || '').slice(0, 500),
+      PROCESS_END_AT: now,
+      CHANGED_BY: changedBy || '',
+      CHANGED_TIMESTAMP: null
+    };
+
+    const fields = {
+      filePath: 'FILE_PATH', fileHash: 'FILE_HASH', sizeBytes: 'FILE_SIZE_BYTES',
+      totalRows: 'ROW_COUNT_TOTAL', validCount: 'ROW_COUNT_VALID', errorCount: 'ROW_COUNT_ERROR'
+    };
+    for (const [source, target] of Object.entries(fields)) {
+      if (details[source] !== undefined) payload[target] = details[source];
+    }
+
+    await db.run(UPDATE(ENTITY).set(payload).where({ AUDIT_ID: auditId }));
+  }
 }
+
 module.exports = FileLogRepository;

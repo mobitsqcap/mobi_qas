@@ -5,10 +5,24 @@ const StatusCodeUtil = require('../utils/StatusCodeUtil');
 const F = StatusCodeUtil.FRIENDLY;
 
 class UnifiedIngestionHandler {
-  constructor({ sftpService, errorFileHandler, fileLogRepository, auditRepository,
-                masterFileHandler, masterRepository, masterCsvService }) {
-    Object.assign(this, { sftpService, errorFileHandler, fileLogRepository,
-      auditRepository, masterFileHandler, masterRepository, masterCsvService });
+  constructor({
+    sftpService,
+    errorFileHandler,
+    fileLogRepository,
+    auditRepository,
+    masterFileHandler,
+    masterRepository,
+    masterCsvService
+  }) {
+    Object.assign(this, {
+      sftpService,
+      errorFileHandler,
+      fileLogRepository,
+      auditRepository,
+      masterFileHandler,
+      masterRepository,
+      masterCsvService
+    });
   }
 
   async handle(executionContext = {}) {
@@ -26,10 +40,13 @@ class UnifiedIngestionHandler {
       file.existingIdKeys = existingIdKeys;
       await this.masterFileHandler.process(file, executionContext, { existingIdKeys });
     }
+
     return { filesProcessed: masterFiles.length, logs };
   }
 
-  async handleMasterOnly(ctx) { return this.handle(ctx); }
+  async handleMasterOnly(ctx) {
+    return this.handle(ctx);
+  }
 
   async _loadExistingIdKeys(logs) {
     try {
@@ -43,9 +60,9 @@ class UnifiedIngestionHandler {
       );
       const keySet = new Set();
       for (const r of rows || []) {
-        const portal  = String(r.MOBI_PORTAL_CODE || '').trim().toUpperCase();
+        const portal = String(r.MOBI_PORTAL_CODE || '').trim().toUpperCase();
         const company = String(r.SAP_COMPANY_CODE || '').trim();
-        const id      = String(r.ID || '').trim().toUpperCase();
+        const id = String(r.ID || '').trim().toUpperCase();
         if (portal && company && id) keySet.add(`${portal}|${company}|${id}`);
       }
       return keySet;
@@ -62,42 +79,72 @@ class UnifiedIngestionHandler {
   async _processInvalidFiles(files, executionContext, expectedType, logs) {
     const actor = executionContext.actor || Constants.SYSTEM_USERS.DEFAULT;
     const runId = executionContext.runId || 'MANUAL_RUN';
+
     for (const invalidFile of files) {
       logs.push(`Invalid ${expectedType} filename: ${invalidFile.name}`);
       const fileLog = await this.fileLogRepository.ensureTracked(invalidFile, actor);
+
       await this.auditRepository.start({
-        auditId: fileLog.AUDIT_ID, runId, fileName: invalidFile.name, createdBy: actor
+        auditId: fileLog.AUDIT_ID,
+        runId,
+        fileName: invalidFile.name,
+        createdBy: actor
       });
+
       const expected = FileTypeUtil.expectedFormat(expectedType);
-      const error = new ValidationError('06', F.invalidFileName(invalidFile.name, expected));
+      const error = new ValidationError(
+        StatusCodeUtil.toCode('INVALID_FILE_NAME', '014'),
+        F.invalidFileName(invalidFile.name, expected)
+      );
+
       const errorPath = invalidFile?.paths?.ERROR_PATH
-        ? `${invalidFile.paths.ERROR_PATH}/${invalidFile.name}` : null;
+        ? `${invalidFile.paths.ERROR_PATH}/${invalidFile.name}`
+        : null;
       const processingPath = invalidFile?.paths?.PROCESSING_PATH
-        ? `${invalidFile.paths.PROCESSING_PATH}/${invalidFile.name}` : null;
+        ? `${invalidFile.paths.PROCESSING_PATH}/${invalidFile.name}`
+        : null;
+
       const errRes = await this.errorFileHandler.handle(invalidFile, error, {
-        paths: invalidFile.paths, errorPath, processingPath, actor,
-        auditId: fileLog.AUDIT_ID, fileLog
+        paths: invalidFile.paths,
+        errorPath,
+        processingPath,
+        actor,
+        auditId: fileLog.AUDIT_ID,
+        fileLog
       });
+
       const detail = error.message;
       await this.fileLogRepository.markFailed(fileLog.AUDIT_ID, detail, actor, {
         filePath: errRes?.errorPath || errorPath || invalidFile.path,
         sizeBytes: invalidFile.sizeBytes ?? null,
-        totalRows: 0, validCount: 0, errorCount: 0
+        totalRows: 0,
+        validCount: 0,
+        errorCount: 0
       });
-      await this.auditRepository.fail(fileLog.AUDIT_ID, error, { totalRows: 0, validCount: 0, errorCount: 0 }, actor, {
-        errorDetail: detail,
-        errorFilePath: errRes?.errorTextPath || null
-      });
+
+      await this.auditRepository.fail(
+        fileLog.AUDIT_ID,
+        error,
+        { totalRows: 0, validCount: 0, errorCount: 0 },
+        actor,
+        {
+          errorDetail: detail,
+          errorFilePath: errRes?.errorTextPath || null
+        }
+      );
     }
   }
 
   _classify(files, expectedType) {
-    return files.reduce((g, f) => {
-      const t = FileTypeUtil.classify(f.name);
-      if (t === expectedType) g.valid.push(f);
-      else g.invalid.push(f);
-      return g;
-    }, { valid: [], invalid: [] });
+    return files.reduce(
+      (g, f) => {
+        const t = FileTypeUtil.classify(f.name);
+        if (t === expectedType) g.valid.push(f);
+        else g.invalid.push(f);
+        return g;
+      },
+      { valid: [], invalid: [] }
+    );
   }
 
   async _listWithContext(paths, directory, source, logs) {

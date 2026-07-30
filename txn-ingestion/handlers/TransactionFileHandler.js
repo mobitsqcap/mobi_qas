@@ -1,405 +1,527 @@
+'use strict';
+
+const path = require('path');
+
 const Constants = require('../utils/Constants');
 const DateUtil = require('../utils/DateUtil');
 const HashUtil = require('../utils/HashUtil');
 const CsvUtil = require('../utils/CsvUtil');
+const StatusCodeUtil = require('../utils/StatusCodeUtil');
+
 class TransactionFileHandler {
-  constructor(dependencies) { Object.assign(this, dependencies); }
+  constructor(dependencies) {
+    Object.assign(this, dependencies);
+  }
+
   async process(file, executionContext = {}) {
     let context = null;
     try {
-      // A normal FILE_IN filename is one-time only. Retry is allowed exclusively through _Updated.csv.
-      if (file.source === 'filein' && !file.isUpdated && await this.fileLogRepository.hasAnyFileName(file.name)) {
+      if (
+        file.source === 'filein' &&
+        !file.isUpdated &&
+        await this.fileLogRepository.hasAnyFileName(file.name)
+      ) {
         await this.rejectDuplicateFile(file, executionContext);
-        return;
+        return { status: 'REJECTED_DUPLICATE' };
       }
-      context = await this.begin(file, executionContext); context = await this.prepare(file, context); context = await this.parseAndValidate(file, context); await this.commitOrWriteOutputs(file, context); }
-    catch (error) { await this.handleHardFailure(file, context, error); }
+
+      context = await this.begin(file, executionContext);
+      context = await this.prepare(file, context);
+
+      // Point 3 (duplicate-hash scenario): if the file's content hash already
+      // matches a previously COMPLETED file, reject it as a duplicate.
+      if (
+        this.fileHashService &&
+        !file.isUpdated &&
+        context.fileHash &&
+        await this.fileHashService.isDuplicateFile(context.fileHash)
+      ) {
+        await this.rejectDuplicateFile(file, executionContext, {
+          code: StatusCodeUtil.toCode('DUPLICATE_FILE'),
+          detail: `Duplicate file content (sha256 ${String(context.fileHash).slice(0, 16)}...). An identical file was already completed; no records were inserted.`
+        });
+        return { status: 'REJECTED_DUPLICATE' };
+      }
+
+      context = await this.parseAndValidate(file, context);
+      await this.commitOrWriteOutputs(file, context);
+
+      return { status: context.invalidRecords.length ? 'REJECTED' : 'COMPLETED' };
+    } catch (error) {
+      await this.handleHardFailure(file, context, error);
+      return { status: 'FAILED', error };
+    }
   }
+
   async begin(file, executionContext = {}) {
-    const fileLog = executionContext.forceNewAudit ? await this.fileLogRepository.createNewAttempt(file) : await this.fileLogRepository.ensureTracked(file);
-    const paths = file.paths;
-    if (!paths) throw new Error(`SFTP paths missing for file ${file.name}`);
-    const processingPath = paths.PROCESSING_PATH ? await this.sftpService.resolvePath(`${paths.PROCESSING_PATH}/${file.name}`) : file.path;
-    const completedPath = await this.sftpService.resolvePath(`${paths.PROCESSED_PATH}/${file.name}`);
-    const errorPath = await this.sftpService.resolvePath(`${paths.ERROR_PATH}/${file.name}`);
-    await this.auditRepository.start({ auditId: fileLog.AUDIT_ID, runId: executionContext.runId || file.name, fileName: file.name, createdBy: Constants.SYSTEM_USERS.SFTP });
-    return { auditId: fileLog.AUDIT_ID, fileLog, paths, processingPath, completedPath, errorPath, date8: DateUtil.extractDate8(file.name), isRetry: file.source === 'processing' };
-  }
-  async rejectDuplicateFile(file, executionContext = {}) {
-    const context = await this.begin(file, { ...executionContext, forceNewAudit: true });
-    const buffer = await this.sftpService.downloadFile(file.path);
-    const parsed = CsvUtil.parseNormalized(buffer);
-    const rows = parsed.rows.map((raw, index) => ({
-      _RAW_ROW: raw,
-      _ROW_NUMBER: index + 2,
-      AUDIT_ID: context.auditId,
-      ROW_STATUS: Constants.ROW_STATUS.INVALID,
-      ERROR_CODE: 'DUPLICATE_FILE_NAME',
-      ERROR_DETAIL: `Duplicate file name: ${file.name}. Use Transactions_YYYYMMDD_Updated.csv for a corrected replacement.`
-    }));
-    // Remove the incoming duplicate from FILE_IN so it does not fail again on the next poll.
-    try { await this.sftpService.moveFile(file.path, context.errorPath); file.path = context.errorPath; }
-    catch (error) { console.warn(`[TransactionFileHandler] Could not move duplicate input to ERROR: ${error.message}`); }
-    const detail = `Duplicate file name: ${file.name}. No records were validated or inserted. Use Transactions_YYYYMMDD_Updated.csv for a corrected replacement.`;
-    const outputs = await this.errorFileHandler.handle(file, rows, { paths: context.paths, errorPath: context.errorPath, auditId: context.auditId, date8: context.date8, validCount: 0, errorCode: 'DUPLICATE_FILE_NAME', errorDetail: detail });
-    const result = { totalRows: rows.length, validCount: 0, errorCount: rows.length };
-    await this.fileLogRepository.updateResult(context.auditId, result, HashUtil.sha256(buffer), Constants.SYSTEM_USERS.SFTP, outputs.errorCsvPath, { statusOverride: Constants.FILE_STATUS.FAILED, errorDetail: detail });
-    await this.auditRepository.complete(context.auditId, result, Constants.SYSTEM_USERS.SFTP, { statusOverride: Constants.FILE_STATUS.FAILED, errorCode: 'DUPLICATE_FILE_NAME', errorDetail: detail });
+    if (!file.paths) throw new Error(`SFTP paths missing for file ${file.name}`);
+
+    const actor = executionContext.actor || this.systemUser || Constants.SYSTEM_USERS.SFTP;
+    const fileLog = executionContext.forceNewAudit
+      ? await this.fileLogRepository.createNewAttempt(file)
+      : await this.fileLogRepository.ensureTracked(file);
+
+    const processingPath = file.paths.PROCESSING_PATH
+      ? await this.sftpService.resolvePath(`${file.paths.PROCESSING_PATH}/${file.name}`)
+      : file.path;
+
+    const completedPath = await this.sftpService.resolvePath(
+      `${file.paths.PROCESSED_PATH}/${file.name}`
+    );
+
+    const errorPath = await this.sftpService.resolvePath(`${file.paths.ERROR_PATH}/${file.name}`);
+
+    await this.auditRepository.start({
+      auditId: fileLog.AUDIT_ID,
+      runId: executionContext.runId || file.name,
+      fileName: file.name,
+      createdBy: actor
+    });
+
+    return {
+      auditId: fileLog.AUDIT_ID,
+      fileLog,
+      paths: file.paths,
+      processingPath,
+      completedPath,
+      errorPath,
+      actor,
+      date8: DateUtil.extractDate8(file.name),
+      isRetry: file.source === 'processing'
+    };
   }
 
   async prepare(file, context) {
     let pathToRead = file.path;
-    if (file.source !== 'processing' && context.paths?.PROCESSING_PATH && file.path !== context.processingPath) {
-      await this.sftpService.moveFile(file.path, context.processingPath);
-      file.path = context.processingPath; file.source = 'processing'; pathToRead = context.processingPath;
+
+    if (
+      file.source !== 'processing' &&
+      context.paths.PROCESSING_PATH &&
+      file.path !== context.processingPath
+    ) {
+      try {
+        await this.sftpService.moveFile(file.path, context.processingPath);
+      } catch (cause) {
+        throw this._codedError(
+          'FILE_MOVE_FAILED',
+          StatusCodeUtil.FRIENDLY.fileMoveFailed(file.path, context.processingPath, cause.message),
+          cause
+        );
+      }
+      file.path = context.processingPath;
+      file.source = 'processing';
+      pathToRead = context.processingPath;
     }
-    const buffer = await this.sftpService.downloadFile(pathToRead);
-    return { ...context, buffer, sizeBytes: buffer.length, fileHash: HashUtil.sha256(buffer) };
+
+    let buffer;
+    try {
+      buffer = await this.sftpService.downloadFile(pathToRead);
+    } catch (cause) {
+      throw this._codedError(
+        'FILE_DOWNLOAD_FAILED',
+        StatusCodeUtil.FRIENDLY.fileDownloadFailed(pathToRead, cause.message),
+        cause
+      );
+    }
+
+    const prepared = {
+      ...context,
+      buffer,
+      sizeBytes: buffer.length,
+      fileHash: HashUtil.sha256(buffer)
+    };
+
+    await this.fileLogRepository.markPicked(context.auditId, {
+      filePath: context.processingPath,
+      fileHash: prepared.fileHash,
+      sizeBytes: prepared.sizeBytes,
+      totalRows: 0,
+      validCount: 0,
+      errorCount: 0,
+      changedBy: context.actor
+    });
+
+    await this.auditRepository.markProcessing(context.auditId, {
+      totalRows: 0,
+      validCount: 0,
+      errorCount: 0
+    });
+
+    await this.batchProcessingService.resetAttempt(context.auditId);
+
+    return prepared;
   }
+
   async parseAndValidate(file, context) {
     const parsed = this.csvService.parse(context.buffer, context.auditId);
-    parsed.records.forEach((record, index) => { record._ROW_NUMBER = index + 2; record.AUDIT_ID = context.auditId; });
-    await this.fileLogRepository.markPicked(context.auditId, { filePath: context.processingPath, fileHash: context.fileHash, sizeBytes: context.sizeBytes, totalRows: parsed.totalRows, validCount: 0, errorCount: 0 });
-    await this.auditRepository.updateProgress(context.auditId, { totalRows: parsed.totalRows, validCount: 0, errorCount: 0 });
-    if (!this.batchProcessingService) throw new Error('batchProcessingService is not configured in TransactionFileHandler');
-    const result = await this.batchProcessingService.process(parsed.records, file.name, context.auditId);
-    return { ...context, totalRows: parsed.totalRows, validRecords: result.validRecords || [], invalidRecords: result.invalidRows || [], allRecords: result.allRecords || parsed.records };
+
+    parsed.records.forEach((record, index) => {
+      record._ROW_NUMBER = index + 2;
+      record.AUDIT_ID = context.auditId;
+    });
+
+    await this.auditRepository.initializeRows(context.auditId, file.name, parsed.records);
+
+    await this.fileLogRepository.updateProgress(context.auditId, {
+      totalRows: parsed.totalRows,
+      validCount: 0,
+      errorCount: 0,
+      changedBy: context.actor
+    });
+
+    await this.auditRepository.updateProgress(context.auditId, {
+      totalRows: parsed.totalRows,
+      validCount: 0,
+      errorCount: 0
+    });
+
+    const progress = async (stats) => {
+      await Promise.all([
+        this.fileLogRepository.updateProgress(context.auditId, { ...stats, changedBy: context.actor }),
+        this.auditRepository.updateProgress(context.auditId, stats)
+      ]);
+    };
+
+    const batchResult = await this.batchProcessingService.process(
+      parsed.records,
+      file.name,
+      context.auditId,
+      progress
+    );
+
+    return {
+      ...context,
+      totalRows: parsed.totalRows,
+      validRecords: batchResult.validRecords || [],
+      invalidRecords: batchResult.invalidRows || [],
+      allRecords: batchResult.allRecords || parsed.records,
+      insertedCount: batchResult.insertedCount || 0
+    };
   }
+
   async commitOrWriteOutputs(file, context) {
     const validCount = context.validRecords.length;
     const errorCount = context.invalidRecords.length;
     const result = { totalRows: context.totalRows, validCount, errorCount };
-    if (errorCount) {
-      const outputs = await this.errorFileHandler.handle(file, context.allRecords, { paths: context.paths, errorPath: context.errorPath, auditId: context.auditId, date8: context.date8, validCount });
-      const detail = `${errorCount} record(s) failed validation. Entire file rejected; no records were inserted.`;
-      await this.fileLogRepository.updateResult(context.auditId, result, context.fileHash, Constants.SYSTEM_USERS.SFTP, outputs.errorCsvPath, { statusOverride: Constants.FILE_STATUS.FAILED, errorDetail: detail });
-      await this.auditRepository.complete(context.auditId, result, Constants.SYSTEM_USERS.SFTP, { statusOverride: Constants.FILE_STATUS.FAILED, errorCode: 'FILE_VALIDATION_FAILED', errorDetail: detail });
+
+    if (errorCount > 0) {
+      // Requirement #1: one invalid row rejects the entire file.
+      const detail = `${errorCount} record(s) failed validation. Entire file rejected;` +
+        `${validCount} otherwise-valid record(s) were not inserted.`;
+
+      await this.errorFileHandler.handle(file, context.allRecords, {
+        paths: context.paths,
+        errorPath: context.errorPath,
+        auditId: context.auditId,
+        date8: context.date8,
+        validCount,
+        sourceBuffer: context.buffer,
+        errorCode: StatusCodeUtil.toCode('VALIDATION_FAILED'),
+        errorDetail: detail
+      });
+
+      // Point 4: move the rejected source file from PROCESSING into ERROR so it
+      // is not re-scanned and reprocessed on every subsequent run.
+      let rejectedFilePath = context.processingPath;
+      try {
+        const errorDir = path.posix.dirname(context.errorPath);
+        const rejectedPath = path.posix.join(errorDir, file.name);
+        if (context.processingPath && context.processingPath !== rejectedPath) {
+          await this.sftpService.moveFile(context.processingPath, rejectedPath);
+          rejectedFilePath = rejectedPath;
+          file.path = rejectedPath;
+        }
+      } catch (cause) {
+        console.warn(`[TransactionFileHandler] Could not move rejected file to ERROR: ${cause.message}`);
+      }
+
+      await this.auditRepository.finalizeRows(
+        context.auditId,
+        file.name,
+        context.allRecords,
+        { fileRejected: true }
+      );
+
+      await this.fileLogRepository.updateResult(
+        context.auditId,
+        result,
+        context.fileHash,
+        context.actor,
+        rejectedFilePath,
+        {
+          statusCode: StatusCodeUtil.toCode('FAILED'),
+          errorCode: StatusCodeUtil.toCode('VALIDATION_FAILED'),
+          errorDetail: detail
+        }
+      );
+
       return;
     }
-    const outputPath = context.completedPath.replace(/[^/]+$/, Constants.OUTPUT_NAMING.FULL_SUCCESS(context.date8 || 'UNKNOWN', DateUtil.nowHCMSS()));
-    await this.successFileHandler.handle(file, { processingPath: context.processingPath, completedPath: outputPath, validRecords: context.validRecords, case: 'FULL' });
-    await this.fileLogRepository.updateResult(context.auditId, result, context.fileHash, Constants.SYSTEM_USERS.SFTP, outputPath, { statusOverride: Constants.FILE_STATUS.COMPLETED, errorDetail: '' });
-    await this.auditRepository.complete(context.auditId, result, Constants.SYSTEM_USERS.SFTP, { statusOverride: Constants.FILE_STATUS.COMPLETED, errorCode: '', errorDetail: '' });
+
+    const outputPath = context.completedPath.replace(
+      /[^/]+$/,
+      Constants.OUTPUT_NAMING.FULL_SUCCESS(
+        context.date8 || 'UNKNOWN',
+        DateUtil.nowHHMMSS()
+      )
+    );
+
+    try {
+      await this.successFileHandler.handle(file, {
+        processingPath: context.processingPath,
+        completedPath: outputPath
+      });
+    } catch (cause) {
+      throw this._codedError(
+        'FILE_MOVE_FAILED',
+        StatusCodeUtil.FRIENDLY.fileMoveFailed(context.processingPath, outputPath, cause.message),
+        cause
+      );
+    }
+
+    await this.auditRepository.finalizeRows(
+      context.auditId,
+      file.name,
+      context.allRecords,
+      { fileRejected: false }
+    );
+
+    await this.fileLogRepository.updateResult(
+      context.auditId,
+      result,
+      context.fileHash,
+      context.actor,
+      outputPath,
+      { statusCode: StatusCodeUtil.toCode('COMPLETED'), errorDetail: '' }
+    );
   }
+
+  async rejectDuplicateFile(file, executionContext = {}, rejection = {}) {
+    const context = await this.begin(file, { ...executionContext, forceNewAudit: true });
+
+    let buffer;
+    try {
+      buffer = await this.sftpService.downloadFile(file.path);
+    } catch (cause) {
+      throw this._codedError('FILE_DOWNLOAD_FAILED', cause.message, cause);
+    }
+
+    const parsed = CsvUtil.parseNormalized(buffer);
+
+    const duplicateCode = rejection.code || StatusCodeUtil.toCode('DUPLICATE_FILE_NAME');
+    const detail = rejection.detail ||
+      (`Duplicate file name: ${file.name}. No records were inserted.` +
+        'Use Transactions_YYYYMMDD_Updated.csv for a corrected replacement.');
+
+    const rows = parsed.rows.map((raw, index) => ({
+      _RAW_ROW: raw,
+      _ROW_NUMBER: index + 2,
+      _FILE_LEVEL_ERROR: true,
+      ROW_STATUS: Constants.ROW_STATUS.INVALID,
+      STATUS_CODE: duplicateCode,
+      STATUS_MESSAGE: detail
+    }));
+
+    let finalPath = file.path;
+    try {
+      await this.sftpService.moveFile(file.path, context.errorPath);
+      finalPath = context.errorPath;
+      file.path = finalPath;
+    } catch (error) {
+      console.warn(`[TransactionFileHandler] Could not move duplicate input: ${error.message}`);
+    }
+
+    await this.errorFileHandler.handle(file, rows, {
+      paths: context.paths,
+      errorPath: context.errorPath,
+      auditId: context.auditId,
+      date8: context.date8,
+      validCount: 0,
+      sourceBuffer: buffer,
+      errorCode: duplicateCode,
+      errorDetail: detail,
+      fileLevelFailure: true
+    });
+
+    const result = { totalRows: rows.length, validCount: 0, errorCount: rows.length };
+    await this.fileLogRepository.updateResult(
+      context.auditId,
+      result,
+      HashUtil.sha256(buffer),
+      context.actor,
+      finalPath,
+      {
+        statusCode: StatusCodeUtil.toCode('FAILED'),
+        errorCode: duplicateCode,
+        errorDetail: detail
+      }
+    );
+
+    await this.auditRepository.recordFileFailure(
+      context.auditId,
+      file.name,
+      parsed.rows,
+      { code: duplicateCode, message: detail }
+    );
+  }
+
+  async rejectInvalidFileName(file, executionContext = {}, rejection = {}) {
+    let context = null;
+    try {
+      context = await this.begin(file, { ...executionContext, forceNewAudit: true });
+
+      let buffer;
+      try {
+        buffer = await this.sftpService.downloadFile(file.path);
+      } catch (cause) {
+        throw this._codedError(
+          'FILE_DOWNLOAD_FAILED',
+          StatusCodeUtil.FRIENDLY.fileDownloadFailed(file.path, cause.message),
+          cause
+        );
+      }
+
+      context = {
+        ...context,
+        buffer,
+        sizeBytes: buffer.length,
+        fileHash: HashUtil.sha256(buffer)
+      };
+
+      const statusName = rejection.statusName || 'INVALID_FILE_NAME';
+      const invalidCode = StatusCodeUtil.toCode(statusName);
+
+      const detail = rejection.detail ||
+        (`${file.name} does not match the expected pattern for the selected ingestion flow.` +
+        'Expected Transactions_YYYYMMDD.csv (with a valid calendar date) or a retry file matched to an existing PROCESSING file.');
+
+      const row = {
+        _FILE_LEVEL_ERROR: true,
+        _ROW_NUMBER: '',
+        ROW_STATUS: Constants.ROW_STATUS.INVALID,
+        STATUS_CODE: invalidCode,
+        STATUS_MESSAGE: detail
+      };
+
+      try {
+        await this.sftpService.moveFile(file.path, context.errorPath);
+      } catch (cause) {
+        throw this._codedError(
+          'FILE_MOVE_FAILED',
+          StatusCodeUtil.FRIENDLY.fileMoveFailed(file.path, context.errorPath, cause.message),
+          cause
+        );
+      }
+
+      file.path = context.errorPath;
+
+      await this.errorFileHandler.handle(file, [row], {
+        paths: context.paths,
+        errorPath: context.errorPath,
+        auditId: context.auditId,
+        date8: context.date8,
+        validCount: 0,
+        errorCode: invalidCode,
+        errorDetail: detail,
+        fileLevelFailure: true,
+        sourceBaseNaming: true,
+        skipErrorCsv: true
+      });
+
+      const result = { totalRows: 0, validCount: 0, errorCount: 1 };
+      await this.fileLogRepository.updateResult(
+        context.auditId,
+        result,
+        HashUtil.sha256(buffer),
+        context.actor,
+        context.errorPath,
+        {
+          statusCode: StatusCodeUtil.toCode('FAILED'),
+          errorCode: invalidCode,
+          errorDetail: detail
+        }
+      );
+
+      await this.auditRepository.recordFileFailure(
+        context.auditId,
+        file.name,
+        [],
+        { code: invalidCode, message: detail }
+      );
+
+      return { status: StatusCodeUtil.toText(invalidCode) };
+    } catch (error) {
+      await this.handleHardFailure(file, context, error);
+      return { status: 'FAILED', error };
+    }
+  }
+
   async handleHardFailure(file, context, error) {
-    if (!context?.auditId) return;
-    const totalRows = error?.totalRows ?? context.totalRows ?? 0;
-    await this.fileLogRepository.markFailed(context.auditId, error.message, Constants.SYSTEM_USERS.SFTP, { filePath: file?.path || context.processingPath, fileHash: context.fileHash || '', sizeBytes: context.sizeBytes ?? file?.sizeBytes ?? 0, totalRows, validCount: 0, errorCount: error?.errorCount ?? totalRows });
-    await this.auditRepository.fail(context.auditId, error, { totalRows, validCount: 0, errorCount: error?.errorCount ?? totalRows }, Constants.SYSTEM_USERS.SFTP);
+    if (!context?.auditId) {
+      console.error(`[TransactionFileHandler] ${file?.name || 'unknown'} failed: ${error.message}`);
+      return;
+    }
+
+    const code = StatusCodeUtil.normalizeCode(error.code, 'UNKNOWN_ERROR');
+    const totalRows = error.totalRows ?? context.totalRows ?? 0;
+    const errorCount = error.errorCount ?? totalRows;
+
+    const rawRows = (error.rawRows || []).map((raw, index) => ({
+      _RAW_ROW: raw,
+      _ROW_NUMBER: index + 2,
+      _FILE_LEVEL_ERROR: true,
+      ROW_STATUS: Constants.ROW_STATUS.INVALID,
+      STATUS_CODE: code,
+      STATUS_MESSAGE: error.message
+    }));
+
+    try {
+      await this.errorFileHandler.handle(file, rawRows, {
+        paths: context.paths,
+        errorPath: context.errorPath,
+        auditId: context.auditId,
+        date8: context.date8,
+        validCount: 0,
+        sourceBuffer: context.buffer,
+        errorCode: code,
+        errorDetail: error.message,
+        fileLevelFailure: true
+      });
+    } catch (writeError) {
+      console.warn(`[TransactionFileHandler] Could not write error report: ${writeError.message}`);
+    }
+
+    try {
+      await this.fileLogRepository.markFailed(context.auditId, error.message, context.actor, {
+        errorCode: code,
+        filePath: file?.path || context.processingPath,
+        fileHash: context.fileHash || '',
+        sizeBytes: context.sizeBytes ?? file?.sizeBytes ?? 0,
+        totalRows,
+        validCount: 0,
+        errorCount
+      });
+    } catch (logError) {
+      console.error(`[TransactionFileHandler] FILELOG failure: ${logError.message}`);
+    }
+
+    try {
+      await this.auditRepository.recordFileFailure(
+        context.auditId,
+        file.name,
+        error.rawRows || [],
+        { code, message: error.message }
+      );
+    } catch (auditError) {
+      console.error(`[TransactionFileHandler] AUDIT failure: ${auditError.message}`);
+    }
+  }
+
+  _codedError(statusName, message, cause) {
+    const error = new Error(message, cause ? { cause } : undefined);
+    error.code = StatusCodeUtil.toCode(statusName);
+    return error;
   }
 }
+
 module.exports = TransactionFileHandler;
-
-
-
-
-// const Constants = require('../utils/Constants');
-// const DateUtil = require('../utils/DateUtil');
-// const HashUtil = require('../utils/HashUtil');
-// class TransactionFileHandler {
-//   constructor(dependencies) { Object.assign(this, dependencies); }
-//   async process(file, executionContext = {}) {
-//     let context = null;
-//     try { context = await this.begin(file, executionContext); context = await this.prepare(file, context); context = await this.parseAndValidate(file, context); await this.commitOrWriteOutputs(file, context); }
-//     catch (error) { await this.handleHardFailure(file, context, error); }
-//   }
-//   async begin(file, executionContext = {}) {
-//     const fileLog = await this.fileLogRepository.ensureTracked(file);
-//     const paths = file.paths;
-//     if (!paths) throw new Error(`SFTP paths missing for file ${file.name}`);
-//     const processingPath = paths.PROCESSING_PATH ? await this.sftpService.resolvePath(`${paths.PROCESSING_PATH}/${file.name}`) : file.path;
-//     const completedPath = await this.sftpService.resolvePath(`${paths.PROCESSED_PATH}/${file.name}`);
-//     const errorPath = await this.sftpService.resolvePath(`${paths.ERROR_PATH}/${file.name}`);
-//     await this.auditRepository.start({ auditId: fileLog.AUDIT_ID, runId: executionContext.runId || file.name, fileName: file.name, createdBy: Constants.SYSTEM_USERS.SFTP });
-//     return { auditId: fileLog.AUDIT_ID, fileLog, paths, processingPath, completedPath, errorPath, date8: DateUtil.extractDate8(file.name), isRetry: file.source === 'processing' };
-//   }
-//   async prepare(file, context) {
-//     let pathToRead = file.path;
-//     if (file.source !== 'processing' && context.paths?.PROCESSING_PATH && file.path !== context.processingPath) {
-//       await this.sftpService.moveFile(file.path, context.processingPath);
-//       file.path = context.processingPath; file.source = 'processing'; pathToRead = context.processingPath;
-//     }
-//     const buffer = await this.sftpService.downloadFile(pathToRead);
-//     return { ...context, buffer, sizeBytes: buffer.length, fileHash: HashUtil.sha256(buffer) };
-//   }
-//   async parseAndValidate(file, context) {
-//     const parsed = this.csvService.parse(context.buffer, context.auditId);
-//     parsed.records.forEach((record, index) => { record._ROW_NUMBER = index + 2; record.AUDIT_ID = context.auditId; });
-//     await this.fileLogRepository.markPicked(context.auditId, { filePath: context.processingPath, fileHash: context.fileHash, sizeBytes: context.sizeBytes, totalRows: parsed.totalRows, validCount: 0, errorCount: 0 });
-//     await this.auditRepository.updateProgress(context.auditId, { totalRows: parsed.totalRows, validCount: 0, errorCount: 0 });
-//     if (!this.batchProcessingService) throw new Error('batchProcessingService is not configured in TransactionFileHandler');
-//     const result = await this.batchProcessingService.process(parsed.records, file.name, context.auditId);
-//     return { ...context, totalRows: parsed.totalRows, validRecords: result.validRecords || [], invalidRecords: result.invalidRows || [], allRecords: result.allRecords || parsed.records };
-//   }
-//   async commitOrWriteOutputs(file, context) {
-//     const validCount = context.validRecords.length;
-//     const errorCount = context.invalidRecords.length;
-//     const result = { totalRows: context.totalRows, validCount, errorCount };
-//     if (errorCount) {
-//       const outputs = await this.errorFileHandler.handle(file, context.allRecords, { paths: context.paths, errorPath: context.errorPath, auditId: context.auditId, date8: context.date8, validCount });
-//       const detail = `${errorCount} record(s) failed validation. Entire file rejected; no records were inserted.`;
-//       await this.fileLogRepository.updateResult(context.auditId, result, context.fileHash, Constants.SYSTEM_USERS.SFTP, outputs.errorCsvPath, { statusOverride: Constants.FILE_STATUS.FAILED, errorDetail: detail });
-//       await this.auditRepository.complete(context.auditId, result, Constants.SYSTEM_USERS.SFTP, { statusOverride: Constants.FILE_STATUS.FAILED, errorCode: 'FILE_VALIDATION_FAILED', errorDetail: detail });
-//       return;
-//     }
-//     const outputPath = context.completedPath.replace(/[^/]+$/, Constants.OUTPUT_NAMING.FULL_SUCCESS(context.date8 || 'UNKNOWN', DateUtil.nowHCMSS()));
-//     await this.successFileHandler.handle(file, { processingPath: context.processingPath, completedPath: outputPath, validRecords: context.validRecords, case: 'FULL' });
-//     await this.fileLogRepository.updateResult(context.auditId, result, context.fileHash, Constants.SYSTEM_USERS.SFTP, outputPath, { statusOverride: Constants.FILE_STATUS.COMPLETED, errorDetail: '' });
-//     await this.auditRepository.complete(context.auditId, result, Constants.SYSTEM_USERS.SFTP, { statusOverride: Constants.FILE_STATUS.COMPLETED, errorCode: '', errorDetail: '' });
-//   }
-//   async handleHardFailure(file, context, error) {
-//     if (!context?.auditId) return;
-//     const totalRows = error?.totalRows ?? context.totalRows ?? 0;
-//     await this.fileLogRepository.markFailed(context.auditId, error.message, Constants.SYSTEM_USERS.SFTP, { filePath: file?.path || context.processingPath, fileHash: context.fileHash || '', sizeBytes: context.sizeBytes ?? file?.sizeBytes ?? 0, totalRows, validCount: 0, errorCount: error?.errorCount ?? totalRows });
-//     await this.auditRepository.fail(context.auditId, error, { totalRows, validCount: 0, errorCount: error?.errorCount ?? totalRows }, Constants.SYSTEM_USERS.SFTP);
-//   }
-// }
-// module.exports = TransactionFileHandler;
-
-
-
-
-// const Constants = require('../utils/Constants');
-// const DateUtil = require('../utils/DateUtil');
-// const HashUtil = require('../utils/HashUtil');
-
-// class TransactionFileHandler {
-//   constructor({
-//     sftpService,
-//     csvService,
-//     batchProcessingService,
-//     fileLogRepository,
-//     auditRepository,
-//     successFileHandler,
-//     errorFileHandler,
-//     systemUser
-//   }) {
-//     Object.assign(this, {
-//       sftpService,
-//       csvService,
-//       batchProcessingService,
-//       fileLogRepository,
-//       auditRepository,
-//       successFileHandler,
-//       errorFileHandler,
-//       systemUser
-//     });
-//   }
-
-//   async process(file, executionContext = {}) {
-//     let context = null;
-//     try {
-//       context = await this.begin(file, executionContext);
-//       context = await this.prepare(file, context);
-//       context = await this.parseAndValidate(file, context);
-//       await this.commitOrWriteOutputs(file, context);
-//     } catch (error) {
-//       await this.handleHardFailure(file, context, error);
-//     }
-//   }
-
-//   async begin(file, executionContext = {}) {
-//     const actor = executionContext.actor || this.systemUser || Constants.SYSTEM_USERS.SFTP;
-//     const runId = executionContext.runId || file.name;
-//     const fileLog = await this.fileLogRepository.ensureTracked(file);
-//     const paths = file.paths;
-
-//     if (!paths) throw new Error(`SFTP paths missing for file ${file.name}`);
-
-//     const processingPath = paths.PROCESSING_PATH
-//       ? await this.sftpService.resolvePath(`${paths.PROCESSING_PATH}/${file.name}`)
-//       : file.path;
-//     const completedPath = await this.sftpService.resolvePath(`${paths.PROCESSED_PATH}/${file.name}`);
-//     const errorPath = await this.sftpService.resolvePath(`${paths.ERROR_PATH}/${file.name}`);
-
-//     await this.auditRepository.start({
-//       auditId: fileLog.AUDIT_ID,
-//       runId,
-//       fileName: file.name,
-//       createdBy: Constants.SYSTEM_USERS.SFTP
-//     });
-
-//     return {
-//       auditId: fileLog.AUDIT_ID,
-//       fileLog,
-//       paths,
-//       processingPath,
-//       completedPath,
-//       errorPath,
-//       actor,
-//       date8: DateUtil.extractDate8(file.name),
-//       isRetry: file.source === 'processing'
-//     };
-//   }
-
-//   async prepare(file, context) {
-//     let pathToRead = file.path;
-
-//     if (file.source !== 'processing' && context.paths?.PROCESSING_PATH && file.path !== context.processingPath) {
-//       try {
-//         await this.sftpService.moveFile(file.path, context.processingPath);
-//         file.path = context.processingPath;
-//         file.source = 'processing';
-//         pathToRead = context.processingPath;
-//       } catch (error) {
-//         console.warn(`[TransactionFileHandler] Move skipped for ${file.name}: ${error.message}`);
-//       }
-//     }
-
-//     const buffer = await this.sftpService.downloadFile(pathToRead);
-//     return { ...context, buffer, sizeBytes: buffer.length, fileHash: HashUtil.sha256(buffer) };
-//   }
-
-//   async parseAndValidate(file, context) {
-//     const parsed = this.csvService.parse(context.buffer, context.auditId);
-
-//     parsed.records.forEach((record, index) => {
-//       record._ROW_NUMBER = index + 2;
-//       record.AUDIT_ID = context.auditId;
-//     });
-
-//     await this.fileLogRepository.markPicked(context.auditId, {
-//       filePath: context.processingPath,
-//       fileHash: context.fileHash || '',
-//       sizeBytes: context.sizeBytes,
-//       totalRows: parsed.totalRows,
-//       validCount: 0,
-//       errorCount: 0
-//     });
-
-//     await this.auditRepository.updateProgress(
-//       context.auditId,
-//       { totalRows: parsed.totalRows, validCount: 0, errorCount: 0 }
-//     );
-
-//     if (!this.batchProcessingService) {
-//       throw new Error('batchProcessingService is not configured in TransactionFileHandler');
-//     }
-
-//     const batchResult = await this.batchProcessingService.process(
-//       parsed.records,
-//       file.name,
-//       context.auditId
-//     );
-
-//     return {
-//       ...context,
-//       totalRows: parsed.totalRows,
-//       validRecords: batchResult.validRecords || [],
-//       invalidRecords: batchResult.invalidRows || []
-//     };
-//   }
-
-//   async commitOrWriteOutputs(file, context) {
-//     const { validRecords, invalidRecords, totalRows, auditId, date8, completedPath } = context;
-//     const validCount = validRecords.length;
-//     const errorCount = invalidRecords.length;
-//     const result = { totalRows, validCount, errorCount };
-
-//     if (errorCount > 0) {
-//       await this.errorFileHandler.handle(file, invalidRecords, {
-//         paths: context.paths,
-//         errorPath: context.errorPath,
-//         auditId,
-//         date8,
-//         validCount
-//       });
-//     }
-
-//     let successCase;
-//     let outputPath;
-//     if (validCount > 0 && errorCount === 0) {
-//       successCase = 'FULL';
-//       outputPath = completedPath.replace(/[^/]+$/, Constants.OUTPUT_NAMING.FULL_SUCCESS(date8 || 'UNKNOWN', DateUtil.nowHCMSS()));
-//     } else if (validCount > 0 && errorCount > 0) {
-//       successCase = 'PARTIAL';
-//       outputPath = completedPath.replace(/[^/]+$/, Constants.OUTPUT_NAMING.PARTIAL_SUCCESS(date8 || 'UNKNOWN'));
-//     }
-
-//     if (successCase) {
-//       await this.successFileHandler.handle(file, {
-//         processingPath: context.processingPath,
-//         completedPath: outputPath,
-//         validRecords,
-//         case: successCase,
-//         date8
-//       });
-//     }
-
-//     // BatchProcessingService has already inserted valid rows. Do not insert again here.
-//     let finalFilePath = context.processingPath;
-//     let statusOverride = Constants.FILE_STATUS.FAILED;
-//     let detail = `${errorCount} record(s) failed. No valid records were inserted.`;
-
-//     if (validCount > 0 && errorCount === 0) {
-//       finalFilePath = outputPath;
-//       statusOverride = Constants.FILE_STATUS.COMPLETED;
-//       detail = '';
-//     } else if (validCount > 0 && errorCount > 0) {
-//       statusOverride = Constants.FILE_STATUS.PARTIALLY_PROCESSED;
-//       detail = `${errorCount} record(s) failed. ${validCount} valid record(s) were inserted in batches and written to FILE_OUT.`;
-//     }
-
-//     await this.fileLogRepository.updateResult(
-//       auditId,
-//       result,
-//       context.fileHash || '',
-//       Constants.SYSTEM_USERS.SFTP,
-//       finalFilePath,
-//       { statusOverride, errorDetail: detail }
-//     );
-
-//     await this.auditRepository.complete(
-//       auditId,
-//       result,
-//       Constants.SYSTEM_USERS.SFTP,
-//       { statusOverride, errorCode: errorCount > 0 ? 'ROW_VALIDATION_FAILED' : '', errorDetail: detail }
-//     );
-//   }
-
-//   async handleHardFailure(file, context, error) {
-//     const auditId = context?.auditId;
-//     if (!auditId) return;
-
-//     const actor = Constants.SYSTEM_USERS.SFTP;
-//     const isTransient = this.sftpService.isTransientError(error);
-
-//     if (!isTransient && context?.errorPath) {
-//       try {
-//         await this.errorFileHandler.handle(file, [{
-//           ERROR_CODE: error.code || 'PARSE_ERROR',
-//           ERROR_DETAIL: error.message,
-//           _ROW_NUMBER: 0
-//         }], {
-//           paths: context.paths,
-//           errorPath: context.errorPath,
-//           auditId,
-//           date8: context.date8,
-//           validCount: 0
-//         });
-//       } catch (writeError) {
-//         console.warn(`[TransactionFileHandler] Could not write error report: ${writeError.message}`);
-//       }
-//     }
-
-//     const totalRows = error?.totalRows ?? context?.totalRows ?? 0;
-//     const errorCount = error?.errorCount ?? totalRows;
-
-//     await this.fileLogRepository.markFailed(auditId, error.message, actor, {
-//       filePath: file?.path || context?.processingPath,
-//       fileHash: context?.fileHash || '',
-//       sizeBytes: context?.sizeBytes ?? file?.sizeBytes ?? 0,
-//       totalRows,
-//       validCount: 0,
-//       errorCount
-//     });
-
-//     await this.auditRepository.fail(auditId, error, {
-//       totalRows,
-//       validCount: 0,
-//       errorCount
-//     }, actor);
-//   }
-// }
-
-// module.exports = TransactionFileHandler;

@@ -1,58 +1,76 @@
-// class TechnicalValidator {
-//   validate(record) {
-//     if (record.ERROR_CODE === 'INVALID_DATE') return { valid: false, code: record.ERROR_CODE, message: record.ERROR_DETAIL };
-//     if (!record.COMPANY_CODE) return { valid: false, code: 'MISSING_COMPANY_CODE', message: 'Company code missing' };
-//     if (!record.PAYMENT_TYPE) return { valid: false, code: 'MISSING_PAYMENT_TYPE', message: 'Payment type missing' };
-//     if (!record.MERCHANT_ID) return { valid: false, code: 'MISSING_MERCHANT_ID', message: 'Merchant id missing' };
-//     return { valid: true };
-//   }
-// }
-// module.exports = TechnicalValidator;
-
-
-
-// const Constants = require('../utils/Constants');
-// const EXPONENTIAL_NUMBER = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)[eE][+-]?\d+$/;
-// class TechnicalValidator {
-//   validate(record) {
-//     if (record.ERROR_CODE === 'INVALID_DATE') return { valid: false, code: record.ERROR_CODE, message: record.ERROR_DETAIL };
-//     if (!record.COMPANY_CODE) return { valid: false, code: 'MISSING_COMPANY_CODE', message: 'Company code missing' };
-//     if (!record.MOBI_PORTAL_CODE) return { valid: false, code: 'MISSING_PORTAL_CODE', message: 'MOBI portal code missing' };
-//     if (!record.PAYMENT_TYPE) return { valid: false, code: 'MISSING_PAYMENT_TYPE', message: 'Payment type missing' };
-//     if (!record.PAYMENT_SUB_TYPE) return { valid: false, code: 'MISSING_PAYMENT_SUB_TYPE', message: 'Payment sub type missing' };
-//     if (!record.MERCHANT_ID) return { valid: false, code: 'MISSING_MERCHANT_ID', message: 'Merchant id missing' };
-//     if (!record.HOST_NAME) return { valid: false, code: 'MISSING_HOST_ID', message: 'Host name missing' };
-//     for (const [field, value] of [['MOBI_REFERENCE_ID', record.MOBI_REFERENCE_ID], ['HOST_REFERENCE_ID', record.HOST_REFERENCE_ID]]) {
-//       const text = String(value || '').trim();
-//       if (text.length > Constants.MAX_REF_ID_LENGTH) return { valid: false, code: 'REFERENCE_ID_TOO_LONG', message: `${field} exceeds ${Constants.MAX_REF_ID_LENGTH} characters` };
-//       if (EXPONENTIAL_NUMBER.test(text)) return { valid: false, code: 'EXPONENTIAL_REFERENCE_ID', message: `${field} must not be an exponential value: ${text}` };
-//     }
-//     return { valid: true };
-//   }
-// }
-// module.exports = TechnicalValidator;
-
-
+'use strict';
 
 const Constants = require('../utils/Constants');
+const StatusCodeUtil = require('../utils/StatusCodeUtil');
+
 const EXPONENTIAL_NUMBER = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)[eE][+-]?\d+$/;
+
 class TechnicalValidator {
   validate(record) {
-    if (record.ERROR_CODE === 'INVALID_DATE') return { valid: false, code: record.ERROR_CODE, message: record.ERROR_DETAIL };
-    if (!record.COMPANY_CODE) return { valid: false, code: 'MISSING_COMPANY_CODE', message: 'Company code missing' };
-    // Company code is a String(4); accept only letters and digits, never special characters.
-    if (!/^[A-Za-z0-9]{1,4}$/.test(String(record.COMPANY_CODE).trim())) return { valid: false, code: 'INVALID_COMPANY_CODE', message: `Company code must be 1-4 alphanumeric characters: ${record.COMPANY_CODE}` };
-    if (!record.MOBI_PORTAL_CODE) return { valid: false, code: 'MISSING_PORTAL_CODE', message: 'MOBI portal code missing' };
-    if (!record.PAYMENT_TYPE) return { valid: false, code: 'MISSING_PAYMENT_TYPE', message: 'Payment type missing' };
-    if (!record.PAYMENT_SUB_TYPE) return { valid: false, code: 'MISSING_PAYMENT_SUB_TYPE', message: 'Payment sub type missing' };
-    if (!record.MERCHANT_ID) return { valid: false, code: 'MISSING_MERCHANT_ID', message: 'Merchant id missing' };
-    if (!record.HOST_NAME) return { valid: false, code: 'MISSING_HOST_ID', message: 'Host ID/name missing' };
-    for (const [field, value] of [['MOBI_REFERENCE_ID', record.MOBI_REFERENCE_ID], ['HOST_REFERENCE_ID', record.HOST_REFERENCE_ID]]) {
-      const text = String(value || '').trim();
-      if (text.length > Constants.MAX_REF_ID_LENGTH) return { valid: false, code: 'REFERENCE_ID_TOO_LONG', message: `${field} exceeds ${Constants.MAX_REF_ID_LENGTH} characters` };
-      if (EXPONENTIAL_NUMBER.test(text)) return { valid: false, code: 'EXPONENTIAL_REFERENCE_ID', message: `${field} must not be an exponential value: ${text}` };
+    const errors = [];
+
+    if (record._DATE_ERRORS?.length) {
+      errors.push({
+        code: StatusCodeUtil.toCode('INVALID_DATE'),
+        message: record._DATE_ERRORS.join(' || ')
+      });
     }
-    return { valid: true };
+
+    const missingCode = StatusCodeUtil.toCode('MISSING_REQUIRED_FIELD');
+    const required = [
+      ['SAP_COMPANY_CODE', record.COMPANY_CODE],
+      ['MOBI_PORTAL_CODE', record.MOBI_PORTAL_CODE],
+      ['PAYMENT_TYPE', record.PAYMENT_TYPE],
+      ['PAYMENT_SUB_TYPE', record.PAYMENT_SUB_TYPE],
+      ['MOBI_REFERENCE_ID', record.MOBI_REFERENCE_ID],
+      ['MERCHANT_ID', record.MERCHANT_ID],
+      ['HOST_NAME', record.HOST_NAME]
+    ];
+    for (const [field, value] of required) {
+      if (!String(value || '').trim()) {
+        errors.push({ code: missingCode, message: StatusCodeUtil.FRIENDLY.missingField(field) });
+      }
+    }
+
+    // Requirement #3: company code must be one of the allowed set (e.g. 1000-5000).
+    const companyCode = String(record.COMPANY_CODE || '').trim();
+    if (companyCode && !Constants.ALLOWED_COMPANY_CODES.has(companyCode)) {
+      errors.push({
+        code: StatusCodeUtil.toCode('INVALID_COMPANY'),
+        message: StatusCodeUtil.FRIENDLY.invalidCompany(companyCode, [...Constants.ALLOWED_COMPANY_CODES])
+      });
+    }
+
+    // Requirement #3: portal code must be one of the allowed set (SG/MY/IN/ID/AE).
+    const portalCode = String(record.MOBI_PORTAL_CODE || '').trim().toUpperCase();
+    if (portalCode && !Constants.VALID_PORTAL_CODES.has(portalCode)) {
+      errors.push({
+        code: StatusCodeUtil.toCode('INVALID_PORTAL'),
+        message: StatusCodeUtil.FRIENDLY.invalidPortal(record.MOBI_PORTAL_CODE, [...Constants.VALID_PORTAL_CODES])
+      });
+    }
+
+    for (const [field, value] of [
+      ['MOBI_REFERENCE_ID', record.MOBI_REFERENCE_ID],
+      ['HOST_REFERENCE_ID', record.HOST_REFERENCE_ID]
+    ]) {
+      const text = String(value || '').trim();
+      if (text.length > Constants.MAX_REF_ID_LENGTH) {
+        errors.push({
+          code: StatusCodeUtil.toCode('REFERENCE_TOO_LONG'),
+          message: StatusCodeUtil.FRIENDLY.refTooLong(field, Constants.MAX_REF_ID_LENGTH)
+        });
+      }
+      if (EXPONENTIAL_NUMBER.test(text)) {
+        errors.push({
+          code: StatusCodeUtil.toCode('EXPONENTIAL_REFERENCE'),
+          message: StatusCodeUtil.FRIENDLY.exponentialRef(field, text)
+        });
+      }
+    }
+
+    return errors.length ? { valid: false, errors } : { valid: true, errors: [] };
   }
 }
+
 module.exports = TechnicalValidator;

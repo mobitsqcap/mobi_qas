@@ -4,14 +4,14 @@ Content-Type: application/json
 {}
 
 ###########
-POST http://localhost:43479/odata/v4/ingestion-master/triggerMasterIngestion
+POST http://localhost:4004/odata/v4/ingestion-master/triggerMasterIngestion
 Content-Type: application/json
 
 {}
 
 
 #####
-POST http://localhost:38989/odata/v4/ingestion-master/replicateMasterStatusToAudit
+POST http://localhost:4004/odata/v4/ingestion-master/replicateMasterStatusToAudit
 Content-Type: application/json
 
 {
@@ -21,22 +21,21 @@ Content-Type: application/json
       "BP_NUMBER": "",
       "POSTING_STATUS": "12",
       "STATUS_CODE": "01",
-      "ERROR_CODE": " ",
+      
       "ERROR_DETAIL": " invalid"
     },
     {
       "ID": "TEST006",
       "BP_NUMBER": "600000066",
       "POSTING_STATUS": "01",
-      "STATUS_CODE": "00",
-      "ERROR_CODE": "",
+      "STATUS_CODE": "00",     
       "ERROR_DETAIL": ""
     }
   ]
 }
 
 ######
-POST http://localhost:40371/odata/v4/ingestiontxn/triggerTransactionIngestion
+POST http://localhost:4004/odata/v4/ingestiontxn/triggerTransactionIngestion
 Content-Type: application/json
 
 {}
@@ -77,7 +76,7 @@ Content-Type: application/json
 
 #######
 
-POST http://localhost:4004/odata/v4/payin-consolidation/runPayinConsolidation
+POST http://localhost:4004/odata/v4/payout-consolidation/runPayoutConsolidation
 Content-Type: application/json
 
 {}

@@ -1,30 +1,46 @@
+'use strict';
+
 /**
- * createBatchPostingResultHandler – handles CPI callbacks for one or many
- * consolidation posting outcomes. Updates HEADER, LINE_ITEM, TRANSACTION
- * and AUDIT in one go, returning the array-of-response shape the original
- * CPI iFlow expects:
+ * BATCH posting-result handler for CPI callbacks (new statusCode-driven schema).
  *
- *   [{ consolRefId, status, postingStatus, message }]
+ * Request item:
+ *   { consolRefId, sapRefDocument, statusCode, httpStatus, errorDetail }
  *
- * Accepts text ("POSTED"/"FAILED") OR code ("03"/"07") postingStatus values.
- * When postingStatus = POSTED, sapRefDocument is required (else error).
+ *   statusCode 061 = POSTED        (requires sapRefDocument = SAP document number)
+ *   statusCode 062 = POSTING_FAILED (errorDetail is written to AUDIT.STATUS_MESSAGE)
+ *   statusCode 060 = POSTING_PENDING
+ *
+ * For backward compatibility, a `postingStatus` text/2-digit value is still
+ * accepted and resolved to one of the three codes above.
+ *
+ * Response item:
+ *   { consolRefId, sapRefDocument, statusCode, httpStatus, errorDetail, message }
+ *
+ * The resolved code is replicated across header, line items, transactions and
+ * audit (ConsolidationRepository -> TransactionRepository -> AuditRepository).
  */
-const cds = require('@sap/cds');
+
 const ScenarioConfig = require('../config/ScenarioConfig');
 const ConsolidationRepository = require('../repositories/ConsolidationRepository');
 const TransactionRepository = require('../repositories/TransactionRepository');
 const AuditRepository = require('../repositories/AuditRepository');
 const Constants = require('../constants/ConsolidationConstants');
 
-const POSTED = Constants.POSTING_STATUS.POSTED;         // '03'
-const POSTING_FAILED = Constants.POSTING_STATUS.FAILED; // '07'
+const SC_POSTING_PENDING = Constants.POSTING_STATUS.POSTING_PENDING; // 060
+const SC_POSTED = Constants.POSTING_STATUS.POSTED;                   // 061
+const SC_POSTING_FAILED = Constants.POSTING_STATUS.POSTING_FAILED;   // 062
+const VALID_STATUS_CODES = new Set([SC_POSTING_PENDING, SC_POSTED, SC_POSTING_FAILED]);
 
-function normalizePostingStatus(input) {
-  const s = String(input || '').trim().toUpperCase();
-  if (['POSTED','SUCCESS','S','03'].includes(s)) return POSTED;
-  if (['POSTING_FAILED','FAILED','ERROR','E','07'].includes(s)) return POSTING_FAILED;
-  if (['POSTING_PENDING','PENDING','02'].includes(s)) return Constants.POSTING_STATUS.POSTING_PENDING;
-  return null;
+// Backward-compatible alias: postingStatus text / legacy 2-digit -> 3-digit code.
+function resolveStatusCode(item) {
+  const direct = String(item.statusCode || item.STATUS_CODE || '').trim();
+  if (direct) return direct;
+
+  const ps = String(item.postingStatus || item.POSTING_STATUS || '').trim().toUpperCase();
+  if (['POSTED', 'SUCCESS', 'S', '03'].includes(ps)) return SC_POSTED;
+  if (['POSTING_FAILED', 'FAILED', 'ERROR', 'E', '07'].includes(ps)) return SC_POSTING_FAILED;
+  if (['POSTING_PENDING', 'PENDING', '02'].includes(ps)) return SC_POSTING_PENDING;
+  return '';
 }
 
 module.exports = function createBatchPostingResultHandler(scenarioCode) {
@@ -32,16 +48,14 @@ module.exports = function createBatchPostingResultHandler(scenarioCode) {
   if (!scenario) throw new Error(`Unknown consolidation scenario: ${scenarioCode}`);
 
   const consolidationRepo = new ConsolidationRepository();
-  const transactionRepo  = new TransactionRepository();
-  const auditRepo        = new AuditRepository({ softFail: true });
+  const transactionRepo = new TransactionRepository();
+  const auditRepo = new AuditRepository({ softFail: true });
 
   return async function batchPostingResultHandler(req) {
     const actor = req?.user?.id || req?.user?.attr?.user_name || scenario.systemUser;
     const items = Array.isArray(req.data?.items)
       ? req.data.items
-      : Array.isArray(req.data)
-        ? req.data
-        : [];
+      : Array.isArray(req.data) ? req.data : [];
 
     if (!items.length) {
       req.error(400, 'items (array of posting results) is required.');
@@ -49,60 +63,77 @@ module.exports = function createBatchPostingResultHandler(scenarioCode) {
     }
 
     const responses = [];
+
     for (const raw of items) {
       const item = raw || {};
-      const consolRefId    = String(item.consolRefId || item.CONSOL_REF_ID || '').trim();
-      const sapRefDocument = item.sapRefDocument || item.SAP_REF_DOCUMENT || null;
-      const requestedCode  = normalizePostingStatus(item.postingStatus || item.POSTING_STATUS);
-      const httpStatus     = item.httpStatus     ?? item.HTTP_STATUS  ?? null;
-      const errorCode      = item.errorCode      || item.ERROR_CODE   || null;
-      const errorDetail    = item.errorDetail    || item.ERROR_DETAIL || null;
+
+      const consolRefId = String(item.consolRefId || item.CONSOL_REF_ID || '').trim();
+      const sapRefDocument = String(item.sapRefDocument || item.SAP_REF_DOCUMENT || item.refdoc || '').trim();
+      const requestedCode = resolveStatusCode(item);
+      const httpStatus = item.httpStatus ?? item.HTTP_STATUS ?? null;
+      const errorDetail = String(item.errorDetail || item.ERROR_DETAIL || '');
+
+      const response = {
+        consolRefId,
+        sapRefDocument,
+        statusCode: requestedCode,
+        httpStatus,
+        errorDetail,
+        message: ''
+      };
 
       if (!consolRefId) {
+        responses.push({ ...response, statusCode: '', message: 'consolRefId is required.' });
+        continue;
+      }
+
+      if (!VALID_STATUS_CODES.has(requestedCode)) {
         responses.push({
-          consolRefId: '', status: 'ERROR', postingStatus: '',
-          message: 'consolRefId is required.'
+          ...response,
+          statusCode: '',
+          message: `Invalid statusCode "${requestedCode}". Expected 060 (POSTING_PENDING), 061 (POSTED) or 062 (POSTING_FAILED).`
         });
         continue;
       }
-      const postingStatus = requestedCode;
-      if (!postingStatus) {
+
+      if (requestedCode === SC_POSTED && !sapRefDocument) {
         responses.push({
-          consolRefId, status: 'ERROR', postingStatus: '',
-          message: 'Invalid postingStatus. Expected POSTED/SUCCESS/03 or FAILED/ERROR/07.'
-        });
-        continue;
-      }
-      if (postingStatus === POSTED && !sapRefDocument) {
-        responses.push({
-          consolRefId, status: 'ERROR', postingStatus,
-          message: 'sapRefDocument is required when postingStatus is POSTED.'
+          ...response,
+          message: 'sapRefDocument is required when statusCode is 061 (POSTED).'
         });
         continue;
       }
 
       try {
-        // 1. Update header + line items
         const result = await consolidationRepo.updatePostingResult(consolRefId, {
-          sapRefDocument, postingStatus, httpStatus, errorCode, errorDetail
+          sapRefDocument: sapRefDocument || null,
+          postingStatus: requestedCode,
+          httpStatus,
+          errorCode: null,
+          errorDetail: errorDetail || null
         }, actor);
-        // 2. Update transactions (CONSOL_STATUS = POSTED/POSTING_FAILED)
-        await transactionRepo.updatePostingResultStatus(consolRefId, postingStatus, actor);
-        // 3. Update AUDIT
+
+        await transactionRepo.updatePostingResultStatus(consolRefId, result.statusCode, actor);
+
         await auditRepo.applyPostingResult({
-          consolRefId, postingStatus, errorCode, errorDetail, sapRefDocument, changedBy: actor
-        });
-        responses.push({
           consolRefId,
-          status: result.postingStatus === POSTED ? 'SUCCESS' : 'ERROR',
-          postingStatus: result.postingStatus,
-          message: result.postingStatus === POSTED
+          postingStatus: result.statusCode,
+          errorCode: null,
+          errorDetail: errorDetail || null,
+          sapRefDocument: sapRefDocument || null,
+          changedBy: actor
+        });
+
+        responses.push({
+          ...response,
+          statusCode: result.statusCode,
+          message: result.statusCode === SC_POSTED
             ? `Posted successfully (SAP ${sapRefDocument})`
-            : `Posting failed: ${errorDetail || errorCode || 'Unknown error'}`
+            : `Posting failed: ${errorDetail || 'Unknown error'}`
         });
       } catch (err) {
         responses.push({
-          consolRefId, status: 'ERROR', postingStatus: postingStatus || '',
+          ...response,
           message: String(err.message || err).substring(0, 500)
         });
       }

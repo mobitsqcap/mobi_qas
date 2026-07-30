@@ -1,119 +1,184 @@
+'use strict';
+
 const Constants = require('../utils/Constants');
+const StatusCodeUtil = require('../utils/StatusCodeUtil');
+
 const key = (...values) => values.map((value) => String(value || '').trim().toUpperCase()).join('|');
 const isHost = (master) => String(master.TYPE || '').trim().toUpperCase() === 'HOST';
 
 class ValidationService {
   constructor({ technicalValidator, businessValidator, currencyValidator, amountValidator, masterRepository, duplicateValidator }) {
-    Object.assign(this, { technicalValidator, businessValidator, currencyValidator, amountValidator, masterRepository, duplicateValidator });
+    Object.assign(this, {
+      technicalValidator,
+      businessValidator,
+      currencyValidator,
+      amountValidator,
+      masterRepository,
+      duplicateValidator
+    });
   }
 
-  async validateBatch(records, duplicateContext = { mobiReferencesSeen: new Set(), hostReferencesSeen: new Set(), masterData: null }) {
-    // Load once per file; the shared duplicateContext is passed by BatchProcessingService.
-    if (!duplicateContext.masterData) duplicateContext.masterData = await this.masterRepository.findActiveForValidation();
-    const allMasters = duplicateContext.masterData;
-    const portalCodes = new Set(allMasters.map((master) => key(master.MOBI_PORTAL_CODE)));
-    const portalCompanyKeys = new Set(allMasters.map((master) => key(master.MOBI_PORTAL_CODE, master.SAP_COMPANY_CODE)));
-    const merchantMap = new Map();
-    const hostKeys = new Set();
+  async validateBatch(records, context) {
+    const shared = context || this.createContext();
 
-    for (const master of allMasters) {
-      const masterKey = key(master.MOBI_PORTAL_CODE, master.SAP_COMPANY_CODE, master.ID);
-      if (isHost(master)) hostKeys.add(masterKey);
-      else merchantMap.set(masterKey, master);
+    if (!shared.masterIndex) {
+      shared.masterIndex = this._buildMasterIndex(await this.masterRepository.findActiveForValidation());
     }
 
-    const { mobiReferencesSeen, hostReferencesSeen } = duplicateContext;
+    const dbDuplicates = this.duplicateValidator
+      ? await this.duplicateValidator.prepare(records)
+      : { existingMobi: new Set(), hostDays: new Set() };
+
     const validated = [];
-    for (const record of records) {
-      const mobiRef = String(record.MOBI_REFERENCE_ID || '').trim();
-      if (mobiRef && mobiReferencesSeen.has(mobiRef)) {
-        validated.push(this._markInvalid(record, { code: 'DUPLICATE_MOBI_REFERENCE_ID', message: `Duplicate MOBI reference ID in file: ${mobiRef}` }));
-        continue;
-      }
-      if (mobiRef) mobiReferencesSeen.add(mobiRef);
 
-      const hostRef = String(record.HOST_REFERENCE_ID || '').trim();
-      const hostDayKeys = [record.TXN_CREATED_DATE, record.TXN_PAID_DATE].filter(Boolean).map((day) => key(hostRef, day));
-      if (hostRef && hostDayKeys.some((hostDayKey) => hostReferencesSeen.has(hostDayKey))) {
-        validated.push(this._markInvalid(record, { code: 'DUPLICATE_HOST_REFERENCE_ID', message: `Duplicate host reference ID on the same transaction day: ${hostRef}` }));
-        continue;
+    for (const record of records) {
+      const errors = [];
+
+      for (const validator of [
+        this.technicalValidator,
+        this.businessValidator,
+        this.currencyValidator,
+        this.amountValidator
+      ]) {
+        if (!validator) continue;
+        const result = await validator.validate(record);
+        if (!result.valid) errors.push(...this._errorsOf(result));
       }
-      hostDayKeys.forEach((hostDayKey) => hostReferencesSeen.add(hostDayKey));
-      validated.push(await this._validateOne(record, { portalCodes, portalCompanyKeys, merchantMap, hostKeys }));
+
+      this._validateInFileDuplicates(record, shared, errors);
+
+      if (this.duplicateValidator) {
+        const duplicateResult = this.duplicateValidator.validate(record, dbDuplicates);
+        if (!duplicateResult.valid) errors.push(...this._errorsOf(duplicateResult));
+      }
+
+      this._validateMaster(record, shared.masterIndex, errors);
+
+      validated.push(errors.length ? this._markInvalid(record, errors) : this._markValid(record));
     }
+
     return validated;
   }
 
-  async _validateOne(record, master) {
-    for (const validator of [this.technicalValidator, this.businessValidator, this.currencyValidator, this.amountValidator, this.duplicateValidator]) {
-      if (!validator) continue;
-      const result = await validator.validate(record);
-      if (!result.valid) return this._markInvalid(record, result);
+  createContext() {
+    return {
+      mobiReferencesSeen: new Set(),
+      hostReferencesSeen: new Set(),
+      masterIndex: null
+    };
+  }
+
+  _validateInFileDuplicates(record, context, errors) {
+    const mobiReference = String(record.MOBI_REFERENCE_ID || '').trim();
+    if (mobiReference) {
+      if (context.mobiReferencesSeen.has(mobiReference)) {
+        errors.push({
+          code: StatusCodeUtil.toCode('DUPLICATE_MOBI_REFERENCE'),
+          message: StatusCodeUtil.FRIENDLY.duplicateMobiRef(mobiReference)
+        });
+      }
+      context.mobiReferencesSeen.add(mobiReference);
     }
 
+    const hostReference = String(record.HOST_REFERENCE_ID || '').trim();
+    if (!hostReference) return;
+
+    const days = [record.TXN_CREATED_DATE, record.TXN_PAID_DATE].filter(Boolean);
+    for (const day of days) {
+      const hostDay = key(hostReference, String(day).slice(0, 10));
+      if (context.hostReferencesSeen.has(hostDay)) {
+        errors.push({
+          code: StatusCodeUtil.toCode('DUPLICATE_HOST_REFERENCE'),
+          message: StatusCodeUtil.FRIENDLY.duplicateHostRef(hostReference, String(day).slice(0, 10))
+        });
+        break;
+      }
+    }
+    days.forEach((day) => context.hostReferencesSeen.add(key(hostReference, String(day).slice(0, 10))));
+  }
+
+  _buildMasterIndex(masters) {
+    const portalCodes = new Set();
+    const portalCompanyKeys = new Set();
+    const merchants = new Map();
+    const hosts = new Set();
+
+    for (const master of masters || []) {
+      portalCodes.add(key(master.MOBI_PORTAL_CODE));
+      portalCompanyKeys.add(key(master.MOBI_PORTAL_CODE, master.SAP_COMPANY_CODE));
+      const masterKey = key(master.MOBI_PORTAL_CODE, master.SAP_COMPANY_CODE, master.ID);
+      if (isHost(master)) hosts.add(masterKey);
+      else merchants.set(masterKey, master);
+    }
+
+    return { portalCodes, portalCompanyKeys, merchants, hosts };
+  }
+
+  _validateMaster(record, index, errors) {
     const portalKey = key(record.MOBI_PORTAL_CODE);
-    const portalCompanyKey = key(record.MOBI_PORTAL_CODE, record.COMPANY_CODE);
+    const companyKey = key(record.MOBI_PORTAL_CODE, record.COMPANY_CODE);
     const merchantKey = key(record.MOBI_PORTAL_CODE, record.COMPANY_CODE, record.MERCHANT_ID);
     const hostKey = key(record.MOBI_PORTAL_CODE, record.COMPANY_CODE, record.HOST_NAME);
 
-    if (!master.portalCodes.has(portalKey)) return this._markInvalid(record, { code: 'INVALID_PORTAL_CODE', message: `Portal code is not active in master data: ${record.MOBI_PORTAL_CODE}` });
-    if (!master.portalCompanyKeys.has(portalCompanyKey)) return this._markInvalid(record, { code: 'INVALID_COMPANY_CODE', message: `Company code is not valid for portal ${record.MOBI_PORTAL_CODE}: ${record.COMPANY_CODE}` });
-    const merchant = master.merchantMap.get(merchantKey);
-    if (!merchant) return this._markInvalid(record, { code: 'INVALID_MERCHANT_ID', message: `Merchant ID is not active for portal/company: ${record.MERCHANT_ID}` });
-    if (!master.hostKeys.has(hostKey)) return this._markInvalid(record, { code: 'INVALID_HOST_ID', message: `Host ID/name is not active for portal/company: ${record.HOST_NAME}` });
+    // Requirement change: every missing master-data element produces the unified
+    // NO_MASTER_DATA_FOUND code with "No master data found "{value}"". All such
+    // issues are collected (no early return) so the full set is concatenated into
+    // one canonical error detail for the text file and the audit.
+    const noMasterCode = StatusCodeUtil.toCode('NO_MASTER_DATA_FOUND');
 
-    record.COUNTRY_CODE = merchant.COUNTRY_CODE;
+    if (!index.portalCodes.has(portalKey)) {
+      errors.push({
+        code: noMasterCode,
+        message: StatusCodeUtil.FRIENDLY.noMasterDataFound(record.MOBI_PORTAL_CODE)
+      });
+    }
+
+    if (!index.portalCompanyKeys.has(companyKey)) {
+      errors.push({
+        code: noMasterCode,
+        message: StatusCodeUtil.FRIENDLY.noMasterDataFound(record.COMPANY_CODE)
+      });
+    }
+
+    const merchant = index.merchants.get(merchantKey);
+    if (!merchant) {
+      errors.push({
+        code: noMasterCode,
+        message: StatusCodeUtil.FRIENDLY.noMasterDataFound(record.MERCHANT_ID)
+      });
+    } else {
+      record.COUNTRY_CODE = merchant.COUNTRY_CODE || '';
+    }
+
+    if (!index.hosts.has(hostKey)) {
+      errors.push({
+        code: noMasterCode,
+        message: StatusCodeUtil.FRIENDLY.noMasterDataFound(record.HOST_NAME)
+      });
+    }
+  }
+
+  _errorsOf(result) {
+    if (result.errors?.length) return result.errors;
+    return [{ code: result.code, message: result.message }];
+  }
+
+  _markValid(record) {
     record.ROW_STATUS = Constants.ROW_STATUS.VALID;
-    record.ERROR_CODE = '';
-    record.ERROR_DETAIL = '';
+    record.STATUS_CODE = StatusCodeUtil.toCode('TRANSACTION_SUCCESS');
+    record.STATUS_MESSAGE = '';
     return record;
   }
 
-  _markInvalid(record, result) {
+  _markInvalid(record, errors) {
     record.ROW_STATUS = Constants.ROW_STATUS.INVALID;
-    record.ERROR_CODE = result.code;
-    record.ERROR_DETAIL = result.message;
+    record.STATUS_CODE = StatusCodeUtil.joinErrorCodes(errors);
+    // STATUS_MESSAGE holds the canonical, fully-concatenated detail — identical
+    // to what the error text file and the audit will display for this record.
+    record.STATUS_MESSAGE = StatusCodeUtil.concatErrorDetail(errors).slice(0, 500);
+    record._VALIDATION_ERRORS = errors;
     return record;
   }
 }
-module.exports = ValidationService; 
 
-// const Constants = require('../utils/Constants');
-
-// class ValidationService {
-//   constructor({ technicalValidator, businessValidator, currencyValidator, amountValidator, masterRepository, duplicateValidator }) {
-//     Object.assign(this, { technicalValidator, businessValidator, currencyValidator, amountValidator, masterRepository, duplicateValidator });
-//   }
-
-//   async validateBatch(records) {
-//     const ids = records.map((r) => r.MERCHANT_ID).filter(Boolean);
-//     const masters = await this.masterRepository.findActiveByIds(ids);
-//     const masterMap = new Map();
-//     for (const m of masters) masterMap.set(`${m.MOBI_PORTAL_CODE}|${m.SAP_COMPANY_CODE}|${m.ID}`, m);
-
-//     const validated = []; const seenKeys = new Set();
-//     for (const record of records) {
-//       const dupKey = `${record.COMPANY_CODE}|${record.MOBI_REFERENCE_ID}|${record.PAYMENT_TYPE}`;
-//       if (seenKeys.has(dupKey)) { validated.push(this._markInvalid(record, { code: 'DUPLICATE_TRANSACTION', message: `Duplicate within file: ${record.MOBI_REFERENCE_ID}` })); continue; }
-//       seenKeys.add(dupKey);
-//       validated.push(await this._validateOne(record, masterMap));
-//     }
-//     return validated;
-//   }
-
-//   async _validateOne(record, masterMap) {
-//     for (const v of [this.technicalValidator, this.businessValidator, this.currencyValidator, this.amountValidator, this.duplicateValidator]) {
-//       if (!v) continue;
-//       const r = await v.validate(record);
-//       if (!r.valid) return this._markInvalid(record, r);
-//     }
-//     const master = masterMap.get(`${record.MOBI_PORTAL_CODE}|${record.COMPANY_CODE}|${record.MERCHANT_ID}`);
-//     if (!master) return this._markInvalid(record, { code: 'MERCHANT_NOT_FOUND', message: `Merchant ${record.MERCHANT_ID} not found/inactive` });
-//     record.COUNTRY_CODE = master.COUNTRY_CODE;
-//     record.ROW_STATUS = Constants.ROW_STATUS.VALID; record.ERROR_CODE = ''; record.ERROR_DETAIL = '';
-//     return record;
-//   }
-
-//   _markInvalid(record, result) { record.ROW_STATUS = Constants.ROW_STATUS.INVALID; record.ERROR_CODE = result.code; record.ERROR_DETAIL = result.message; return record; }
-// }
-// module.exports = ValidationService;
+module.exports = ValidationService;
