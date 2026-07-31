@@ -199,91 +199,164 @@ class TransactionFileHandler {
     };
   }
 
-  async commitOrWriteOutputs(file, context) {
-    const validCount = context.validRecords.length;
-    const errorCount = context.invalidRecords.length;
-    const result = { totalRows: context.totalRows, validCount, errorCount };
+  // async commitOrWriteOutputs(file, context) {
+  //   const validCount = context.validRecords.length;
+  //   const errorCount = context.invalidRecords.length;
+  //   const result = { totalRows: context.totalRows, validCount, errorCount };
 
-    if (errorCount > 0) {
-      // Requirement #1: one invalid row rejects the entire file.
-      const detail = `${errorCount} record(s) failed validation. Entire file rejected;` +
-        `${validCount} otherwise-valid record(s) were not inserted.`;
+  //   if (errorCount > 0) {
+  //     // Requirement #1: one invalid row rejects the entire file.
+  //     const detail = `${errorCount} record(s) failed validation. Entire file rejected;` +
+  //       `${validCount} otherwise-valid record(s) were not inserted.`;
 
-      await this.errorFileHandler.handle(file, context.allRecords, {
-        paths: context.paths,
-        errorPath: context.errorPath,
-        auditId: context.auditId,
-        date8: context.date8,
-        validCount,
-        sourceBuffer: context.buffer,
-        errorCode: StatusCodeUtil.toCode('VALIDATION_FAILED'),
-        errorDetail: detail
-      });
+  //     await this.errorFileHandler.handle(file, context.allRecords, {
+  //       paths: context.paths,
+  //       errorPath: context.errorPath,
+  //       auditId: context.auditId,
+  //       date8: context.date8,
+  //       validCount,
+  //       sourceBuffer: context.buffer,
+  //       errorCode: StatusCodeUtil.toCode('VALIDATION_FAILED'),
+  //       errorDetail: detail
+  //     });
 
-      // Point 4: move the rejected source file from PROCESSING into ERROR so it
-      // is not re-scanned and reprocessed on every subsequent run.
-      let rejectedFilePath = context.processingPath;
+  //     // Point 2 + reprocessing fix: only _errors.csv (copy) + _text.file are kept
+  //     // in ERROR. The original source is removed from PROCESSING so it is not
+  //     // re-scanned/reprocessed (its content is preserved in _errors.csv).
+  //     const rejectedFilePath = context.processingPath;
+  //     try {
+  //       if (context.processingPath) {
+  //         await this.sftpService.deleteFile(context.processingPath);
+  //       }
+  //     } catch (cause) {
+  //       console.warn(`[TransactionFileHandler] Could not delete rejected source: ${cause.message}`);
+  //     }
+
+  //     await this.auditRepository.finalizeRows(
+  //       context.auditId,
+  //       file.name,
+  //       context.allRecords,
+  //       { fileRejected: true }
+  //     );
+
+  //     await this.fileLogRepository.updateResult(
+  //       context.auditId,
+  //       result,
+  //       context.fileHash,
+  //       context.actor,
+  //       rejectedFilePath,
+  //       {
+  //         statusCode: StatusCodeUtil.toCode('FAILED'),
+  //         errorCode: StatusCodeUtil.toCode('VALIDATION_FAILED'),
+  //         errorDetail: detail
+  //       }
+  //     );
+
+  //     return;
+  //   }
+
+  //   const outputPath = context.completedPath.replace(
+  //     /[^/]+$/,
+  //     Constants.OUTPUT_NAMING.FULL_SUCCESS(
+  //       context.date8 || 'UNKNOWN',
+  //       DateUtil.nowHHMMSS()
+  //     )
+  //   );
+
+  //   try {
+  //     await this.successFileHandler.handle(file, {
+  //       processingPath: context.processingPath,
+  //       completedPath: outputPath
+  //     });
+  //   } catch (cause) {
+  //     throw this._codedError(
+  //       'FILE_MOVE_FAILED',
+  //       StatusCodeUtil.FRIENDLY.fileMoveFailed(context.processingPath, outputPath, cause.message),
+  //       cause
+  //     );
+  //   }
+
+  //   await this.auditRepository.finalizeRows(
+  //     context.auditId,
+  //     file.name,
+  //     context.allRecords,
+  //     { fileRejected: false }
+  //   );
+
+  //   await this.fileLogRepository.updateResult(
+  //     context.auditId,
+  //     result,
+  //     context.fileHash,
+  //     context.actor,
+  //     outputPath,
+  //     { statusCode: StatusCodeUtil.toCode('COMPLETED'), errorDetail: '' }
+  //   );
+  // }
+async commitOrWriteOutputs(file, context) {
+  const validCount = context.validRecords.length;
+  const errorCount = context.invalidRecords.length;
+  const result = { totalRows: context.totalRows, validCount, errorCount };
+
+  if (errorCount > 0) {
+    // Requirement #1 (unchanged): one invalid row rejects the entire file;
+    // otherwise-valid records are NOT inserted.
+    //
+    // NEW (partial-valid rule):
+    //  - Partially valid (validCount > 0): the source file STAYS in PROCESSING
+    //    (so it can be retried via _Updated.csv) AND a full copy is placed in
+    //    PROCESSED. ERROR outputs are written as usual.
+    //  - Fully invalid (validCount = 0): old behavior — ERROR only, source
+    //    removed from PROCESSING.
+    const partiallyValid = validCount > 0;
+
+    const detail = `${errorCount} record(s) failed validation. Entire file rejected; ` +
+      `${validCount} otherwise-valid record(s) were not inserted.` +
+      (partiallyValid ? ' Original payload kept in PROCESSING and copied to PROCESSED.' : '');
+
+    await this.errorFileHandler.handle(file, context.allRecords, {
+      paths: context.paths,
+      errorPath: context.errorPath,
+      auditId: context.auditId,
+      date8: context.date8,
+      validCount,
+      sourceBuffer: context.buffer,
+      errorCode: StatusCodeUtil.toCode('VALIDATION_FAILED'),
+      errorDetail: detail
+    });
+
+    // The file keeps living in PROCESSING for partial rejects.
+    let finalPath = context.processingPath;
+
+    if (partiallyValid && context.completedPath) {
+      // NEW: copy — NOT move — the full original payload into PROCESSED.
+      // We reuse the already-downloaded buffer, so the SFTP round-trip is
+      // upload-only and the PROCESSING file is left untouched.
       try {
-        const errorDir = path.posix.dirname(context.errorPath);
-        const rejectedPath = path.posix.join(errorDir, file.name);
-        if (context.processingPath && context.processingPath !== rejectedPath) {
-          await this.sftpService.moveFile(context.processingPath, rejectedPath);
-          rejectedFilePath = rejectedPath;
-          file.path = rejectedPath;
-        }
+        const payload = context.buffer
+          ? context.buffer
+          : await this.sftpService.downloadFile(context.processingPath);
+        await this.sftpService.uploadFile(context.completedPath, payload);
       } catch (cause) {
-        console.warn(`[TransactionFileHandler] Could not move rejected file to ERROR: ${cause.message}`);
+        console.warn(
+          `[TransactionFileHandler] Could not copy partial file to PROCESSED: ${cause.message}. ` +
+          'Source remains in PROCESSING.'
+        );
       }
-
-      await this.auditRepository.finalizeRows(
-        context.auditId,
-        file.name,
-        context.allRecords,
-        { fileRejected: true }
-      );
-
-      await this.fileLogRepository.updateResult(
-        context.auditId,
-        result,
-        context.fileHash,
-        context.actor,
-        rejectedFilePath,
-        {
-          statusCode: StatusCodeUtil.toCode('FAILED'),
-          errorCode: StatusCodeUtil.toCode('VALIDATION_FAILED'),
-          errorDetail: detail
-        }
-      );
-
-      return;
-    }
-
-    const outputPath = context.completedPath.replace(
-      /[^/]+$/,
-      Constants.OUTPUT_NAMING.FULL_SUCCESS(
-        context.date8 || 'UNKNOWN',
-        DateUtil.nowHHMMSS()
-      )
-    );
-
-    try {
-      await this.successFileHandler.handle(file, {
-        processingPath: context.processingPath,
-        completedPath: outputPath
-      });
-    } catch (cause) {
-      throw this._codedError(
-        'FILE_MOVE_FAILED',
-        StatusCodeUtil.FRIENDLY.fileMoveFailed(context.processingPath, outputPath, cause.message),
-        cause
-      );
+    } else if (context.processingPath) {
+      // Fully invalid (unchanged): original source removed from PROCESSING
+      // (content preserved in _ERRORS.csv) so it is not re-scanned.
+      try {
+        await this.sftpService.deleteFile(context.processingPath);
+      } catch (cause) {
+        console.warn(`[TransactionFileHandler] Could not delete rejected source: ${cause.message}`);
+      }
     }
 
     await this.auditRepository.finalizeRows(
       context.auditId,
       file.name,
       context.allRecords,
-      { fileRejected: false }
+      { fileRejected: true }
     );
 
     await this.fileLogRepository.updateResult(
@@ -291,11 +364,55 @@ class TransactionFileHandler {
       result,
       context.fileHash,
       context.actor,
-      outputPath,
-      { statusCode: StatusCodeUtil.toCode('COMPLETED'), errorDetail: '' }
+      finalPath,
+      {
+        statusCode: StatusCodeUtil.toCode('FAILED'),
+        errorCode: StatusCodeUtil.toCode('VALIDATION_FAILED'),
+        errorDetail: detail
+      }
+    );
+
+    return;
+  }
+
+  // ---- success path below is unchanged ----
+  const outputPath = context.completedPath.replace(
+    /[^/]+$/,
+    Constants.OUTPUT_NAMING.FULL_SUCCESS(
+      context.date8 || 'UNKNOWN',
+      DateUtil.nowHHMMSS()
+    )
+  );
+
+  try {
+    await this.successFileHandler.handle(file, {
+      processingPath: context.processingPath,
+      completedPath: outputPath
+    });
+  } catch (cause) {
+    throw this._codedError(
+      'FILE_MOVE_FAILED',
+      StatusCodeUtil.FRIENDLY.fileMoveFailed(context.processingPath, outputPath, cause.message),
+      cause
     );
   }
 
+  await this.auditRepository.finalizeRows(
+    context.auditId,
+    file.name,
+    context.allRecords,
+    { fileRejected: false }
+  );
+
+  await this.fileLogRepository.updateResult(
+    context.auditId,
+    result,
+    context.fileHash,
+    context.actor,
+    outputPath,
+    { statusCode: StatusCodeUtil.toCode('COMPLETED'), errorDetail: '' }
+  );
+}
   async rejectDuplicateFile(file, executionContext = {}, rejection = {}) {
     const context = await this.begin(file, { ...executionContext, forceNewAudit: true });
 

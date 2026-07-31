@@ -7,6 +7,7 @@ const Constants = require('../constants/ConsolidationConstants');
 class DomesticSettlementConsolidationBuilder extends BaseScenarioBuilder {
   async buildDocuments(records, options, context) {
     const documents = [];
+    const unbalanced = [];
 
     for (const record of records) {
       const companyCode = this.getCompanyCode(record);

@@ -14,7 +14,7 @@ modules:
   provides:
   - name: srv-api
     properties:
-      srv-url: ${default-url}
+      srv-url: ${default-url}m
   parameters:
     buildpack: nodejs_buildpack
     instances: 1

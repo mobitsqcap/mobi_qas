@@ -1,14 +1,5 @@
 'use strict';
 
-/**
- * ConsolidationRepository — HEADER + LINE_ITEM persistence.
- *
- * CONSOLIDATIONHEADER / CONSOLIDATIONLINEITEM expose a single STATUS_CODE :
- * String(3) holding a global 3-digit code from MOBI_DB_STATUS (053=CONSOLIDATION_PENDING,
- * 060=POSTING_PENDING, 061=POSTED, 062=POSTING_FAILED). Error detail text is
- * written to AUDIT.STATUS_MESSAGE only.
- */
-
 const cds = require('@sap/cds');
 const { SELECT, INSERT, UPDATE } = cds.ql;
 
@@ -90,19 +81,16 @@ class ConsolidationRepository {
       HTTP_STATUS: result.httpStatus ?? null,
       RETRY_COUNT: isFailed
         ? Number(existing.RETRY_COUNT || 0) + 1
-        : Number(existing.RETRY_COUNT || 0),
-      CHANGED_BY: changedBy,
-      CHANGED_TIMESTAMP: now
+        : Number(existing.RETRY_COUNT || 0)
     };
 
     await db.run(UPDATE(EntityNames.CONSOLIDATION_HEADER).set(payload).where({ CONSOL_REF_ID: consolRefId }));
 
     const linePayload = {
+      SAP_REF_DOCUMENT: sapRef,
       STATUS_CODE: statusCode,
       POST_DATE: now,
-      HTTP_STATUS: result.httpStatus ?? null,
-      CHANGED_BY: changedBy,
-      CHANGED_TIMESTAMP: now
+      HTTP_STATUS: result.httpStatus ?? null
     };
     await db.run(UPDATE(EntityNames.CONSOLIDATION_LINE_ITEM).set(linePayload).where({ CONSOL_REF_ID: consolRefId }));
 

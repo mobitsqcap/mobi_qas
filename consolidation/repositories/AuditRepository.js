@@ -3,9 +3,15 @@
 /**
  * Consolidation AuditRepository — target schema: MOBI_DB_AUDIT.
  *
- * We write strict per-event rows (RUN / TRANSACTION / DOCUMENT / POSTING / PATCH).
- * STATUS_CODE is always a 3-digit global code from StatusCodeUtil.STATUS.
- * STATUS_MESSAGE holds human-readable detail.
+ * Audit layout (per the agreed table):
+ *   Ingestion (written by the txn-ingestion AuditRepository):
+ *     PROCESS_NAME=TRANSACTION_INGESTION, PROCESS_TYPE=FILE / SFTP TO BTP
+ *   Consolidation build (one row per source transaction):
+ *     PROCESS_NAME=CONSOLIDATION, PROCESS_TYPE=PAYIN / PAYOUT / DOMESTIC,
+ *     OBJECT_ID=MOBI_REFERENCE_ID, OBJECT_NAME=CONSOL_REF_ID, 060 POSTING PENDING
+ *   CPI posting (append-only):
+ *     PROCESS_NAME=CONSOLIDATION, PROCESS_TYPE=CPI TO SAP,
+ *     OBJECT_ID=CONSOL_REF_ID, OBJECT_NAME=SAP_REF_DOCUMENT, 061/062
  */
 
 const cds = require('@sap/cds');
@@ -108,6 +114,7 @@ class AuditRepository {
 
     const now = DateUtil.nowTimestamp();
     const startTime = processStartAt || now;
+    const processType = consolProcessType(scenarioCode);
 
     const entries = records.map((r) => {
       const key = this._txnKey(r);
@@ -120,9 +127,9 @@ class AuditRepository {
         AUDIT_ID: IdUtil.uuid(),
         PROCESS_ID: runId,
         PROCESS_NAME: PROCESS_NAME,
-        PROCESS_TYPE: Constants.AUDIT.PROCESS_TYPES.TRANSACTION,
+        PROCESS_TYPE: processType,
         OBJECT_ID: r.MOBI_REFERENCE_ID || r.CONSOL_REF_ID || null,
-        OBJECT_NAME: buildTransactionObjectName(r, scenarioCode),
+        OBJECT_NAME: r.MOBI_REFERENCE_ID || r.CONSOL_REF_ID || null,
         STATUS_CODE: statusCode,
         STATUS_MESSAGE: String(detail).substring(0, 500),
         START_TIME: startTime,
@@ -143,31 +150,32 @@ class AuditRepository {
 
     const now = DateUtil.nowTimestamp();
     const startTime = processStartAt || now;
+    const processType = consolProcessType(scenarioCode);
     const entries = [];
 
+    // One audit row per source transaction that was consolidated.
+    //   OBJECT_ID   = MOBI_REFERENCE_ID (source transaction)
+    //   OBJECT_NAME = CONSOL_REF_ID     (the document it was grouped into)
+    //   STATUS_CODE = 060 POSTING_PENDING
     for (const doc of documents) {
       const header = doc.header || {};
       const sources = doc.sourceTransactions || [];
-      const refList = sources.map((s) => s.MOBI_REFERENCE_ID).filter(Boolean);
-
-      const detail = refList.length > 1
-        ? `Consolidated ${refList.length} transactions into ${header.CONSOL_REF_ID}`
-        : `Consolidated ${header.CONSOL_REF_ID}`;
-
-      entries.push({
-        AUDIT_ID: IdUtil.uuid(),
-        PROCESS_ID: runId,
-        PROCESS_NAME: PROCESS_NAME,
-        PROCESS_TYPE: Constants.AUDIT.PROCESS_TYPES.DOCUMENT,
-        OBJECT_ID: header.CONSOL_REF_ID || null,
-        OBJECT_NAME: `${scenarioCode || ''} Document ${header.CONSOL_REF_ID || ''}`.trim(),
-        STATUS_CODE: SC.POSTING_PENDING,
-        STATUS_MESSAGE: detail.substring(0, 500),
-        START_TIME: startTime,
-        END_TIME: now,
-        CREATED_BY: changedBy,
-        CREATED_TIMESTAMP: now
-      });
+      for (const src of sources) {
+        entries.push({
+          AUDIT_ID: IdUtil.uuid(),
+          PROCESS_ID: runId,
+          PROCESS_NAME: PROCESS_NAME,
+          PROCESS_TYPE: processType,
+          OBJECT_ID: src.MOBI_REFERENCE_ID || header.CONSOL_REF_ID || null,
+          OBJECT_NAME: header.CONSOL_REF_ID || null,
+          STATUS_CODE: SC.POSTING_PENDING,
+          STATUS_MESSAGE: 'POSTING PENDING',
+          START_TIME: startTime,
+          END_TIME: now,
+          CREATED_BY: changedBy,
+          CREATED_TIMESTAMP: now
+        });
+      }
     }
 
     await this._insert(entries);
@@ -178,49 +186,27 @@ class AuditRepository {
     consolRefId, postingStatus, errorCode = null,
     errorDetail = null, sapRefDocument = null, changedBy
   }) {
-    if (!consolRefId) return { updated: 0 };
+    if (!consolRefId) return { inserted: 0 };
 
     const now = DateUtil.nowTimestamp();
     const statusText = mapPostingStatusToText(postingStatus);
     const statusCode = StatusCodeUtil.toCode(statusText, SC.POSTING_FAILED);
 
     const statusMessage = statusCode === SC.POSTED
-      ? (sapRefDocument ? `Posted SAP ${sapRefDocument}` : 'Posted').substring(0, 500)
-      : String(errorDetail || errorCode || 'Posting failed').substring(0, 500);
+      ? 'POSTED'
+      : String(errorDetail || errorCode || 'POSTING FAILED').substring(0, 500);
 
-    const db = await cds.connect.to('db');
-
-    const existing = await db.run(
-      SELECT.from(EntityNames.AUDIT).columns('AUDIT_ID')
-        .where({ OBJECT_ID: consolRefId })
-        .and({ PROCESS_NAME: PROCESS_NAME })
-        .orderBy({ CREATED_TIMESTAMP: 'desc' })
-    );
-
-    const payload = {
-      STATUS_CODE: statusCode,
-      STATUS_MESSAGE: statusMessage,
-      END_TIME: now,
-      CREATED_BY: changedBy,
-      CREATED_TIMESTAMP: now
-    };
-
-    if (existing && existing.length) {
-      const ids = existing.map((r) => r.AUDIT_ID).filter(Boolean);
-      for (let i = 0; i < ids.length; i += 500) {
-        const chunk = ids.slice(i, i + 500);
-        await db.run(UPDATE(EntityNames.AUDIT).set(payload).where({ AUDIT_ID: { in: chunk } }));
-      }
-      return { updated: ids.length, status: statusText };
-    }
-
+    // Append a dedicated "CPI TO SAP" audit row for the posting event.
+    //   OBJECT_ID   = CONSOL_REF_ID
+    //   OBJECT_NAME = SAP_REF_DOCUMENT (or consolRefId if not posted)
+    //   STATUS_CODE = 061 POSTED / 062 POSTING_FAILED
     await this._insert([{
       AUDIT_ID: IdUtil.uuid(),
       PROCESS_ID: IdUtil.runId('POST'),
       PROCESS_NAME: PROCESS_NAME,
-      PROCESS_TYPE: Constants.AUDIT.PROCESS_TYPES.POSTING,
+      PROCESS_TYPE: 'CPI TO SAP',
       OBJECT_ID: consolRefId,
-      OBJECT_NAME: `Posting result ${consolRefId}`,
+      OBJECT_NAME: sapRefDocument || consolRefId,
       STATUS_CODE: statusCode,
       STATUS_MESSAGE: statusMessage,
       START_TIME: now,
@@ -229,7 +215,7 @@ class AuditRepository {
       CREATED_TIMESTAMP: now
     }]);
 
-    return { updated: 1, status: statusText, inserted: true };
+    return { inserted: 1, status: statusText, statusCode };
   }
 
   async updatePatchAudit({ auditId, consolRefId, docRefItem, changedFields, changedBy }) {
@@ -290,6 +276,11 @@ class AuditRepository {
   }
 }
 
+function consolProcessType(scenarioCode) {
+  if (scenarioCode === 'DOMESTIC_SETTLEMENT') return 'DOMESTIC';
+  return scenarioCode || 'CONSOLIDATION';
+}
+
 function buildRunCompletionMessage(status, total, success, errors) {
   const s = String(status || '').toUpperCase();
   if (s === 'SUCCESS' || s === 'COMPLETED') {
@@ -302,10 +293,6 @@ function buildRunCompletionMessage(status, total, success, errors) {
     return `Run failed: ${errors || 0} errors of ${total || 0} total records`;
   }
   return `Run ended with status ${status}`;
-}
-
-function buildTransactionObjectName(r, scenarioCode) {
-  return scenarioCode || 'TXN';
 }
 
 function mapPostingStatusToText(postingStatus) {

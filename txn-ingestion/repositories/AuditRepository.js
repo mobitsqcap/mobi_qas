@@ -167,10 +167,10 @@ class AuditRepository {
           detail = 'Row was valid but was not inserted because another row caused complete-file rejection.';
         }
       } else {
-        // Successfully inserted transaction -> 041 TRANSACTION_SUCCESS (point 1).
+        // Successfully inserted transaction -> 041 TRANSACTION_SUCCESS.
         status = 'SUCCESS';
         auditCode = transactionSuccess;
-        detail = 'Transaction success';
+        detail = 'TRANSACTION SUCCESS';
       }
 
       entries.push(this._entry({
