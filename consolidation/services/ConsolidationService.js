@@ -1,19 +1,5 @@
 'use strict';
 
-/**
- * Production consolidation orchestrator.
- *
- * Business flow: candidates -> GL validation -> BP validation -> build documents
- * (from valid records only) -> insert header/lines -> mark transactions
- * posting-pending -> audit success -> (later) posting callback sets POSTED/FAILED.
- *
- * Recoverable errors (missing GL / missing BP) are written to TRANSACTION with
- * the correct 3-digit STATUS_CODE plus a single AUDIT.TRANSACTION row per failed
- * record. Per Requirement #5, the same failures are also exported as
- * Transactions_YYYYMMDD_Consolidation.csv into the SFTP ERROR folder so master /
- * GL gaps can be remediated offline.
- */
-
 const ScenarioConfig = require('../config/ScenarioConfig');
 const BuilderRegistry = require('../builders');
 const MasterRepository = require('../repositories/MasterRepository');

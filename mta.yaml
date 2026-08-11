@@ -43,8 +43,8 @@ modules:
           name: ui5
           url: https://ui5.sap.com
     parameters:
-      disk-quota: 1024M
-      memory: 1024M
+      disk-quota: 512M
+      memory: 512M
       app-name: mobi-cap-approuter-${space}
 
   - name: mobi_dev_cap-db-deployer

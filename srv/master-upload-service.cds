@@ -20,7 +20,7 @@ service MasterUploadService @(path : 'master-upload') {
     @restrict: [
         { grant: '*', to: 'AdminMasterBP' }
     ]
-  entity Master    as projection on db.MOBI_DB_MASTER;
+  entity Master as projection on db.MOBI_DB_MASTER;
 
 
   @readonly
