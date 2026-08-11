@@ -1,10 +1,5 @@
 'use strict';
 
-/**
- * Scenario-run handler.
- * Wraps the ConsolidationService.run() call with a distributed lock and DB
- * retry for transient errors.
- */
 
 const cds = require('@sap/cds');
 const { v4: uuid } = require('uuid');

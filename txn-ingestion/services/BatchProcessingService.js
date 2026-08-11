@@ -3,10 +3,6 @@
 const Constants = require('../utils/Constants');
 const StatusCodeUtil = require('../utils/StatusCodeUtil');
 
-/**
- * Validates every batch before one atomic database transaction is attempted.
- * Any invalid row therefore rejects the complete file and inserts zero rows.
- */
 class BatchProcessingService {
   constructor({ validationService, transactionService, fileBatchRepository }) {
     Object.assign(this, { validationService, transactionService, fileBatchRepository });

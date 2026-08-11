@@ -1,15 +1,5 @@
 'use strict';
 
-/**
- * StatusCodeUtil – Shared status/error code mapping backed by MOBI_DB_STATUS.
- *
- *  - MOBI_DB_STATUS contains only STATUS_CODE (3-digit) and DESCRIPTION.
- *  - All modules use the same global 3-digit status codes.
- *  - AUDIT / TRANSACTION / FILELOG / FILEBATCH / MASTER store 3-digit STATUS_CODE.
- *  - CONSOLIDATION_HEADER / LINE_ITEM use a single 3-digit STATUS_CODE.
- *  - FRIENDLY messages provide detailed user-readable explanations.
- */
-
 const cds = require('@sap/cds');
 const { INSERT } = cds.ql;
 

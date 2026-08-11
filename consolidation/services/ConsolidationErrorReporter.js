@@ -8,17 +8,17 @@ const NormalizeUtil = require('../utils/NormalizeUtil');
 const StatusCodeUtil = require('../utils/StatusCodeUtil');
 
 /**
- * Requirement #5 (+ point 2 revision).
- *
- * When consolidation cannot process a transaction because of a recoverable GL
- * or business-partner gap, write a human-readable TEXT report (same layout as
- * the ingestion _text.file) into the shared SFTP error folder.
- *
- * File name: Transactions_YYYYMMDD_Consolidation.file
- *   - YYYYMMDD is the consolidation run's posting date (fallback: today).
- *   - Folder: Transaction_Data/ERROR (Constants.SFTP.CONSOL_ERROR_PATH).
- *   - Overwritten on every run that still has errors (point 5).
+ * Maps a scenario code to the suffix used in the error file name.
+ * Each scenario gets its own file so Payin / Payout / Domestic Settlement
+ * never overwrite each other.
  */
+function errorFileSuffix(scenarioCode) {
+  if (scenarioCode === 'PAYIN') return 'Payins';
+  if (scenarioCode === 'PAYOUT') return 'Payout';
+  if (scenarioCode === 'DOMESTIC_SETTLEMENT') return 'DomesticSettlement';
+  return scenarioCode || 'Consolidation';
+}
+
 class ConsolidationErrorReporter {
   constructor(sftpService) {
     this.sftpService = sftpService;
@@ -29,7 +29,8 @@ class ConsolidationErrorReporter {
     if (!records.length) return null;
 
     const date8 = DateUtil.date8(postingDate);
-    const fileName = `Transactions_${date8}_Consolidation.file`;
+    const suffix = errorFileSuffix(scenarioCode);
+    const fileName = `Transactions_${date8}_${suffix}.file`;
     const remotePath = path.posix.join(Constants.SFTP.CONSOL_ERROR_PATH, fileName);
 
     const buffer = this._buildTextFile({
@@ -49,21 +50,43 @@ class ConsolidationErrorReporter {
   }
 
   /**
-   * Point 5: when a consolidation run comes back clean (all GL/BP fixed), freeze
-   * the previous error report by renaming
-   *   Transactions_YYYYMMDD_Consolidation.file
-   * to
-   *   Transactions_YYYYMMDD_HHMMSS.csv
-   * (content kept). Returns { renamedFrom, fileName } when a rename happened,
-   * or null when there was no previous report to rename.
+   * When a scenario's run comes back clean (all GL/BP fixed), write a timestamped
+   * "RESOLVED" file and delete the old error file. Uses uploadFile + deleteFile
+   * (no rename dependency).
+   *
+   *   old: Transactions_YYYYMMDD_Payins.file
+   *   new: Transactions_YYYYMMDD_Payins_HHMMSS.file  (RESOLVED content)
    */
-  async resolveErrorReport({ postingDate }) {
+  async resolveErrorReport({ postingDate, scenarioCode, consolidatedCount = 0 }) {
     const date8 = DateUtil.date8(postingDate);
+    const suffix = errorFileSuffix(scenarioCode);
+    const oldPath = path.posix.join(Constants.SFTP.CONSOL_ERROR_PATH, `Transactions_${date8}_${suffix}.file`);
+
+    let exists = false;
+    try { exists = await this.sftpService.exists(oldPath); } catch (_) { exists = false; }
+    if (!exists) return null;
+
     const hhmmss = DateUtil.nowHHMMSS();
-    const fromPath = path.posix.join(Constants.SFTP.CONSOL_ERROR_PATH, `Transactions_${date8}_Consolidation.file`);
-    const toPath = path.posix.join(Constants.SFTP.CONSOL_ERROR_PATH, `Transactions_${date8}_${hhmmss}.csv`);
-    const renamed = await this.sftpService.renameFile(fromPath, toPath);
-    return renamed ? { renamedFrom: fromPath, fileName: path.posix.basename(toPath) } : null;
+    const newFileName = `Transactions_${date8}_${suffix}_${hhmmss}.file`;
+    const newPath = path.posix.join(Constants.SFTP.CONSOL_ERROR_PATH, newFileName);
+
+    const generatedAt = new Date().toISOString();
+    const body = [
+      'STATUS           : RESOLVED',
+      `FILE NAME        : ${newFileName}`,
+      `SCENARIO         : ${scenarioCode || 'CONSOLIDATION'}`,
+      `GENERATED AT     : ${generatedAt}`,
+      '',
+      `All GL account / business-partner issues for posting date ${date8} (${scenarioCode}) have been fixed.`,
+      `${consolidatedCount} record(s) consolidated successfully in the last run.`,
+      'This file previously listed the blocked records; they have now been processed.'
+    ].join('\n');
+
+    // Write the resolved content to a timestamped file, then remove the old one.
+    await this.sftpService.uploadFile(newPath, Buffer.from(body, 'utf8'));
+    try { await this.sftpService.deleteFile(oldPath); } catch (_) { /* best-effort cleanup */ }
+
+    return { fileName: newFileName, rewritten: true };
   }
 
   _buildTextFile({ fileName, auditId, scenarioCode, postingDate, records }) {
@@ -79,6 +102,7 @@ class ConsolidationErrorReporter {
     const lines = [
       `FILE NAME       : ${fileName}`,
       `AUDIT ID        : ${auditId}`,
+      `SCENARIO        : ${scenarioCode || 'CONSOLIDATION'}`,
       `ERROR CODE      : ${codeTexts.join(',') || 'CONSOLIDATION_FAILED'}`,
       `ERROR DETAIL    : ${records.length} record(s) blocked during ${scenarioCode || 'CONSOLIDATION'} consolidation (posting date ${postingDate}) due to missing GL account / business-partner configuration.`,
       `GENERATED AT    : ${generatedAt}`,

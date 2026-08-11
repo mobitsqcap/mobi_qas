@@ -1,12 +1,5 @@
 'use strict';
 
-/**
- * TransactionRepository.
- *
- * MOBI_DB_TRANSACTION has a single STATUS_CODE : String(20) column holding 3-digit
- * global codes. Candidates are transactions with STATUS_CODE in the retryable set
- * (041/053 + recoverable errors 055/056/057/058/059/062).
- */
 
 const cds = require('@sap/cds');
 const { SELECT, UPDATE } = cds.ql;

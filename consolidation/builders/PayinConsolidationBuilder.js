@@ -14,6 +14,7 @@ class PayinConsolidationBuilder extends BaseScenarioBuilder {
     ].join('|'));
 
     const documents = [];
+    const unbalanced = [];
 
     for (const groupRows of dailyGroups.values()) {
       const first = groupRows[0];
@@ -84,11 +85,14 @@ class PayinConsolidationBuilder extends BaseScenarioBuilder {
       const header = this.createHeader({ consolRefId, sapRefDocument, groupRows, totals, options });
       const document = { header, lineItems, sourceTransactions: groupRows };
 
-      this.validateBalanced(document);
-      documents.push(document);
+      if (this.isBalanced(document)) {
+        documents.push(document);
+      } else {
+        unbalanced.push(document);
+      }
     }
 
-    return documents;
+    return { documents, unbalanced };
   }
 }
 

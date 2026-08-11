@@ -11,6 +11,10 @@
       "description": "Administrative access to GL account value lookup data"
     },
     {
+      "name": "$XSAPPNAME.AdminMasterBP",
+      "description": "Administrative access to BP account value lookup data"
+    },
+    {
       "name": "$XSAPPNAME.Jobs",
       "description": "SAP Job Scheduling service scope",
       "grant-as-authority-to-apps": [
@@ -32,6 +36,13 @@
       "scope-references": [
         "$XSAPPNAME.Read",
         "$XSAPPNAME.Admin"
+      ]
+    },
+      {
+      "name": "Admin-MasterBP",
+      "description": "Can View and Upload Master data",
+      "scope-references": [
+        "$XSAPPNAME.AdminMasterBP"
       ]
     },
     {

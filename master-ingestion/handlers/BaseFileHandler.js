@@ -2,6 +2,7 @@ const HashUtil = require('../utils/HashUtil');
 const ErrorMessageUtil = require('../utils/ErrorMessageUtil');
 const StatusCodeUtil = require('../utils/StatusCodeUtil');
 const DateUtil = require('../utils/DateUtil');
+
 const F = StatusCodeUtil.FRIENDLY;
 
 /**
@@ -37,7 +38,8 @@ class BaseFileHandler {
   }
 
   async begin(file, executionContext = {}) {
-    const actor = executionContext.actor || this.systemUser || 'UNKNOWN_USER';
+    // Master flow ALWAYS records SYSTEM_SFTP as the creator, regardless of who triggered the run
+    const actor = this.systemUser || executionContext.actor || 'UNKNOWN_USER';
     const runId = executionContext.runId || file.name;
     const fileLog = await this.fileLogRepository.ensureTracked(file, actor);
     const paths = file.paths;
@@ -81,6 +83,7 @@ class BaseFileHandler {
   async prepare(file, context) {
     const buffer = await this.sftpService.downloadFile(file.path);
     const fileHash = HashUtil.sha256(buffer);
+
     if (await this.fileHashService.isDuplicateFile(fileHash)) {
       const e = new Error('This file has already been processed. Please send a new file.');
       e.code = StatusCodeUtil.toCode('DUPLICATE_FILE', '015');
@@ -137,11 +140,7 @@ class BaseFileHandler {
       validCount: stats.validCount ?? context.stats.validCount,
       errorCount: stats.errorCount ?? context.stats.errorCount
     };
-    await this.fileLogRepository.updateProcessingStats(
-      context.auditId,
-      context.stats,
-      context.actor
-    );
+    await this.fileLogRepository.updateProcessingStats(context.auditId, context.stats, context.actor);
     await this.auditRepository.updateProgress(context.auditId, context.stats, context.actor);
   }
 
@@ -150,7 +149,7 @@ class BaseFileHandler {
     let errorFilePath = null;
 
     if (result.invalidRows && result.invalidRows.length > 0) {
-      // 1. There ARE validation errors: Move CSV and generate text file in ERROR folder ONLY!
+      // 1. There ARE validation errors: Move CSV and generate text file in ERROR folder ONLY
       // Do NOT move to FILE_OUT folder!
       const validationError = new Error(
         `Row validation failed for ${result.errorCount} record(s). See error text file for details.`
@@ -167,11 +166,10 @@ class BaseFileHandler {
         result.validCount,
         result.errorCount
       );
-
       const errRes = await this.errorFileHandler.handle(file, validationError, context);
       errorFilePath = errRes && errRes.errorTextPath;
     } else {
-      // 2. There are NO errors (all records valid): Move CSV to FILE_OUT folder ONLY!
+      // 2. There are NO errors (all records valid): Move CSV to FILE_OUT folder ONLY
       await this.successFileHandler.handle(file, result, context);
     }
 
@@ -183,12 +181,10 @@ class BaseFileHandler {
       context.completedPath,
       { errorDetail }
     );
-
     await this.auditRepository.complete(context.auditId, result, context.actor, {
       errorDetail,
       errorFilePath
     });
-
     await this._auditRecords(context, file, {
       validRecords: result.validRecords || [],
       errorRows: result.invalidRows || [],
@@ -239,7 +235,6 @@ class BaseFileHandler {
 
     const auditId = context?.auditId || context?.fileLog?.AUDIT_ID;
     const actor = context?.actor || this.systemUser || 'UNKNOWN_USER';
-
     if (auditId) {
       await this.fileLogRepository.markFailed(auditId, friendlyErrorDetail, actor, {
         filePath: isTransient ? file.path : errorFilePath || context?.errorPath,
@@ -250,13 +245,11 @@ class BaseFileHandler {
         errorCount: context?.stats?.errorCount,
         errorCode: error?.code
       });
-
       await this.auditRepository.fail(auditId, error, context?.stats || {}, actor, {
         errorDetail: friendlyErrorDetail,
         errorFilePath,
         errorCode: error?.code
       });
-
       if (error?.errorRows?.length) {
         await this._auditRecords(context, file, {
           validRecords: [],
@@ -273,6 +266,7 @@ class BaseFileHandler {
     if (!this.auditRepository.insertRecordRows) return;
     try {
       const written = await this.auditRepository.insertRecordRows({
+        auditId: context.auditId, // NEW: audit rows share the file's AUDIT_ID (from MOBI_DB_FILELOG)
         runId: context.runId,
         fileName: file.name,
         validRecords,

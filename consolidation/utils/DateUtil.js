@@ -24,15 +24,12 @@ class DateUtil {
     return d.replace(/-/g, '');
   }
 
-  // Requirement #5: derive the YYYYMMDD suffix used in the consolidation error
-  // file name. Falls back to today's date when no posting date is supplied.
   static date8(value) {
     const d = this.dbDate(value);
     if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) return d.replace(/-/g, '');
     return new Date().toISOString().slice(0, 10).replace(/-/g, '');
   }
 
-  // Point 5: UTC HHMMSS stamp used when freezing a resolved error report.
   static nowHHMMSS() {
     const d = new Date();
     const pad = (v) => String(v).padStart(2, '0');

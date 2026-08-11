@@ -1,12 +1,5 @@
 'use strict';
 
-/**
- * PATCH handler for consolidation line items.
- *
- * PATCH is only allowed while STATUS_CODE !== '061' (POSTED). Amount fields and
- * GL/CC/PC/DC/BP fields can be modified. AuditRepository.updatePatchAudit()
- * logs every patch to AUDIT (PROCESS_TYPE=PATCH, STATUS_CODE=006 SUCCESS).
- */
 
 const cds = require('@sap/cds');
 const { SELECT, UPDATE } = cds.ql;

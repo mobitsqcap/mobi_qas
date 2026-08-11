@@ -1,9 +1,6 @@
 const cds = require('@sap/cds');
 const { INSERT } = cds.ql;
 
-/* ------------------------------------------------------------------ */
-/* Global Status Codes                                                */
-/* ------------------------------------------------------------------ */
 const STATUS = Object.freeze({
   // General Processing
   '001': 'STARTED',

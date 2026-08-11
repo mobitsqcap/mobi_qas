@@ -75,9 +75,6 @@ class DateUtil {
     return match ? match[1] : null;
   }
 
-  // Requirement #2: the YYYYMMDD embedded in a Transactions_YYYYMMDD.csv name
-  // must resolve to a real calendar date (e.g. Transactions_20260231.csv is
-  // rejected because 31-Feb does not exist).
   static isValidDate8(date8) {
     const match = String(date8 || '').match(/^(\d{4})(\d{2})(\d{2})$/);
     if (!match) return false;

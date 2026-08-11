@@ -38,9 +38,6 @@ class ErrorFileHandler {
 
     const errorTextPath = path.posix.join(errorDirectory, names.text);
 
-    // The failed CSV is an exact copy of the input payload whenever its buffer
-    // is available. No error columns are appended; row details live in the
-    // companion human-readable text report.
     if (errorCsvPath) {
       const csvBuffer = context.sourceBuffer
         ? Buffer.from(context.sourceBuffer)
@@ -143,9 +140,6 @@ class ErrorFileHandler {
 
     let rows;
     if (options.fileLevelFailure) {
-      // Point 3: file-level failures (duplicate file name / duplicate hash /
-      // file-pattern or name mismatch / hard failure) are reported as a SINGLE
-      // summary line rather than one line per source row.
       rows = [{
         _ROW_NUMBER: '',
         STATUS_CODE: options.errorCode,
@@ -214,8 +208,6 @@ class ErrorFileHandler {
   }
 
   _rowDisplayMessage(row, fallbackDetail) {
-    // Use the shared canonical detail so the text file and the audit are always
-    // identical for a record ("CODE: message || CODE: message").
     const detail = StatusCodeUtil.recordErrorDetail(row);
     return detail || this._displayMessage(fallbackDetail);
   }

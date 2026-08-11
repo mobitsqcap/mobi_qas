@@ -32,7 +32,6 @@ class TechnicalValidator {
       }
     }
 
-    // Requirement #3: company code must be one of the allowed set (e.g. 1000-5000).
     const companyCode = String(record.COMPANY_CODE || '').trim();
     if (companyCode && !Constants.ALLOWED_COMPANY_CODES.has(companyCode)) {
       errors.push({
@@ -41,7 +40,6 @@ class TechnicalValidator {
       });
     }
 
-    // Requirement #3: portal code must be one of the allowed set (SG/MY/IN/ID/AE).
     const portalCode = String(record.MOBI_PORTAL_CODE || '').trim().toUpperCase();
     if (portalCode && !Constants.VALID_PORTAL_CODES.has(portalCode)) {
       errors.push({

@@ -1,5 +1,14 @@
 'use strict';
 
+/**
+ * ConsolidationRepository — HEADER + LINE_ITEM persistence.
+ *
+ * CONSOLIDATIONHEADER / CONSOLIDATIONLINEITEM expose a single STATUS_CODE :
+ * String(3) holding a global 3-digit code from MOBI_DB_STATUS (053=CONSOLIDATION_PENDING,
+ * 060=POSTING_PENDING, 061=POSTED, 062=POSTING_FAILED). Error detail text is
+ * written to AUDIT.STATUS_MESSAGE only.
+ */
+
 const cds = require('@sap/cds');
 const { SELECT, INSERT, UPDATE } = cds.ql;
 
@@ -31,12 +40,29 @@ class ConsolidationRepository {
     );
   }
 
-  async insertDocuments(documents) {
+  /**
+   * Insert consolidation headers + line items. The run AUDIT_ID is stamped on
+   * every header and line item so each document traces back to the consolidation
+   * run that created it (join AUDIT_ID -> MOBI_DB_AUDIT). This is the
+   * CONSOLIDATION run id; the source transactions keep their own INGESTION
+   * AUDIT_ID (which file loaded them).
+   */
+  async insertDocuments(documents, auditId = null) {
     if (!documents?.length) return { headersInserted: 0, lineItemsInserted: 0 };
 
+    if (!auditId) {
+      console.warn(
+        '[ConsolidationRepository] insertDocuments called with no auditId — ' +
+        'header & line item AUDIT_ID will be NULL. Copy the latest ' +
+        'ConsolidationService.js (run() passes runAudit.AUDIT_ID here).'
+      );
+    }
+
     const db = await cds.connect.to('db');
-    const headers = documents.map((d) => d.header);
-    const lineItems = documents.flatMap((d) => d.lineItems);
+    const headers = documents.map((d) => ({ ...d.header, AUDIT_ID: auditId }));
+    const lineItems = documents.flatMap((d) =>
+      (d.lineItems || []).map((li) => ({ ...li, AUDIT_ID: auditId }))
+    );
 
     await db.run(INSERT.into(EntityNames.CONSOLIDATION_HEADER).entries(headers));
 
@@ -93,6 +119,14 @@ class ConsolidationRepository {
       HTTP_STATUS: result.httpStatus ?? null
     };
     await db.run(UPDATE(EntityNames.CONSOLIDATION_LINE_ITEM).set(linePayload).where({ CONSOL_REF_ID: consolRefId }));
+
+    // Replicate the posting status onto the linked source transactions (matched
+    // by CONSOL_REF_ID) so MOBI_DB_TRANSACTION.STATUS_CODE moves to 061/062
+    // together with the header/line items — regardless of which handler called
+    // this. (CONSOL_REF_ID is stamped on transactions by markPostingPending.)
+    await db.run(UPDATE(EntityNames.TRANSACTION).set({
+      STATUS_CODE: statusCode
+    }).where({ CONSOL_REF_ID: consolRefId }));
 
     return { consolRefId, statusCode, payload };
   }

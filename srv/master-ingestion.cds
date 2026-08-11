@@ -1,6 +1,5 @@
 using { mobi.db as db } from '../db/schema';
 
-/** Master-data API and master SFTP ingestion endpoint. */
 service IngestionMasterService {
   entity Master     as projection on db.MOBI_DB_MASTER;
   entity FileLogs    as projection on db.MOBI_DB_FILELOG;

@@ -1,12 +1,7 @@
 const Constants = require('./Constants');
 
 class FileTypeUtil {
-  /**
-   * Strictly validates that dateStr is a valid YYYYMMDD date:
-   *  - 4-digit year
-   *  - month 01-12
-   *  - day 01-31 matching exact days in that month (including leap years for Feb)
-   */
+ 
   static isValidDateYYYYMMDD(dateStr) {
     if (!/^\d{8}$/.test(dateStr)) return false;
     const year = Number(dateStr.substring(0, 4));

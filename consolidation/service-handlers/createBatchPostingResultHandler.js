@@ -1,24 +1,5 @@
 'use strict';
 
-/**
- * BATCH posting-result handler for CPI callbacks (new statusCode-driven schema).
- *
- * Request item:
- *   { consolRefId, sapRefDocument, statusCode, httpStatus, errorDetail }
- *
- *   statusCode 061 = POSTED        (requires sapRefDocument = SAP document number)
- *   statusCode 062 = POSTING_FAILED (errorDetail is written to AUDIT.STATUS_MESSAGE)
- *   statusCode 060 = POSTING_PENDING
- *
- * For backward compatibility, a `postingStatus` text/2-digit value is still
- * accepted and resolved to one of the three codes above.
- *
- * Response item:
- *   { consolRefId, sapRefDocument, statusCode, httpStatus, errorDetail, message }
- *
- * The resolved code is replicated across header, line items, transactions and
- * audit (ConsolidationRepository -> TransactionRepository -> AuditRepository).
- */
 
 const ScenarioConfig = require('../config/ScenarioConfig');
 const ConsolidationRepository = require('../repositories/ConsolidationRepository');

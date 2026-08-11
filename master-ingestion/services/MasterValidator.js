@@ -19,7 +19,7 @@ class MasterValidator {
 
       const recordErrors = [];
 
-      // Within-batch duplicates?
+      // Within-batch duplicates
       if (batchIdNormalised.has(normId)) {
         recordErrors.push({
           code: Constants.ERROR_CODES.DUPLICATE_ID_IN_BATCH,

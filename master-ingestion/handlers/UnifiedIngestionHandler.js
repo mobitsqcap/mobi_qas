@@ -77,13 +77,13 @@ class UnifiedIngestionHandler {
   }
 
   async _processInvalidFiles(files, executionContext, expectedType, logs) {
-    const actor = executionContext.actor || Constants.SYSTEM_USERS.DEFAULT;
+    // Master flow ALWAYS records SYSTEM_SFTP as the creator, regardless of who triggered the run
+    const actor = Constants.SYSTEM_USERS.SFTP || executionContext.actor || Constants.SYSTEM_USERS.DEFAULT;
     const runId = executionContext.runId || 'MANUAL_RUN';
 
     for (const invalidFile of files) {
       logs.push(`Invalid ${expectedType} filename: ${invalidFile.name}`);
       const fileLog = await this.fileLogRepository.ensureTracked(invalidFile, actor);
-
       await this.auditRepository.start({
         auditId: fileLog.AUDIT_ID,
         runId,
@@ -121,7 +121,6 @@ class UnifiedIngestionHandler {
         validCount: 0,
         errorCount: 0
       });
-
       await this.auditRepository.fail(
         fileLog.AUDIT_ID,
         error,

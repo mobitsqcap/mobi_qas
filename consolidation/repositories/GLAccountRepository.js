@@ -1,11 +1,6 @@
 'use strict';
 
-/**
- * GL Account lookup.
- *
- * MOBI_DB_GLAccounts.Status is kept as String(2) with legacy '01'=ACTIVE per
- * requirement. The global 3-digit status code table is NOT used for GL accounts.
- */
+
 
 const cds = require('@sap/cds');
 const { SELECT } = cds.ql;

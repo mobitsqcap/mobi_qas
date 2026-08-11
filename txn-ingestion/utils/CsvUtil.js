@@ -1,6 +1,5 @@
 'use strict';
 
-/** RFC 4180-style CSV parser/serializer, including escaped quotes and quoted newlines. */
 class CsvUtil {
   static parseNormalized(buffer) {
     const text = Buffer.from(buffer || '').toString('utf8').replace(/^\uFEFF/, '');

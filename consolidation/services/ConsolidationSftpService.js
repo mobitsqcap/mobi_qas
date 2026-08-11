@@ -80,6 +80,33 @@ class ConsolidationSftpService {
     });
   }
 
+  async exists(remotePath) {
+    return this._withRetry(`exists ${remotePath}`, async (client) =>
+      client.exists(this._resolvePath(remotePath))
+    );
+  }
+
+  async renameFile(from, to) {
+    return this._withRetry(`rename ${from} -> ${to}`, async (client) => {
+      const resolvedFrom = this._resolvePath(from);
+      const resolvedTo = this._resolvePath(to);
+      const fromExists = await client.exists(resolvedFrom);
+      if (!fromExists || fromExists === 'd') return false;
+      const toExists = await client.exists(resolvedTo);
+      if (toExists && toExists !== 'd') await client.delete(resolvedTo);
+      await client.rename(resolvedFrom, resolvedTo);
+      return true;
+    });
+  }
+
+  async deleteFile(remotePath) {
+    return this._withRetry(`delete ${remotePath}`, async (client) => {
+      const resolved = this._resolvePath(remotePath);
+      const exists = await client.exists(resolved);
+      if (exists && exists !== 'd') await client.delete(resolved);
+    });
+  }
+
   async _ensureDir(client, directory) {
     if (!directory || directory === '.' || directory === '/') return;
     const exists = await client.exists(directory);

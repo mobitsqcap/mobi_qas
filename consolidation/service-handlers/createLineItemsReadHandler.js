@@ -1,13 +1,5 @@
 'use strict';
 
-/**
- * LineItems READ handler.
- *
- * The LineItems projection exposes STATUS_CODE (3-digit global code) and a
- * CONSOL_STATUS alias (for backward compatibility with existing consumers that
- * expect the old CONSOL_STATUS name).
- */
-
 const cds = require('@sap/cds');
 
 const EntityNames = require('../constants/EntityNames');

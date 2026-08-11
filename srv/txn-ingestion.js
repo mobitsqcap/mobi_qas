@@ -118,7 +118,6 @@ module.exports = cds.service.impl(async function transactionIngestionService() {
       try {
         await sftpService.disconnect();
       } catch (_) {
-        // The primary processing result is more important than a disconnect warning.
       }
       transactionRunInProgress = false;
     }

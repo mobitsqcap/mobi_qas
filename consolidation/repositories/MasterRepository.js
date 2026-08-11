@@ -1,11 +1,5 @@
 'use strict';
 
-/**
- * Master BP lookup.
- *
- * MOBI_DB_MASTER.STATUS_CODE is String(3), but BP active/inactive is still driven
- * by ACTIVE_FLAG (X/TRUE/Y/1/ACTIVE). Lookup keys are case-insensitive.
- */
 
 const cds = require('@sap/cds');
 const { SELECT } = cds.ql;

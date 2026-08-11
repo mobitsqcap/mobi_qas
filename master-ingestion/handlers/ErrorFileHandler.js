@@ -66,9 +66,6 @@ class ErrorFileHandler {
       }
     }
 
-    // 2. REQUIREMENT 5 GUARANTEE: If moveFile did not succeed for any SFTP reason,
-    // upload context.buffer (or download from candidate path and upload) directly
-    // to target so the original CSV is ALWAYS present in the ERROR folder!
     if (!moved) {
       try {
         if (context?.buffer) {

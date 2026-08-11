@@ -14,6 +14,7 @@ class PayoutConsolidationBuilder extends BaseScenarioBuilder {
     ].join('|'));
 
     const documents = [];
+    const unbalanced = [];
 
     for (const groupRows of dailyGroups.values()) {
       const first = groupRows[0];
@@ -21,7 +22,7 @@ class PayoutConsolidationBuilder extends BaseScenarioBuilder {
       const postingDate = this.getPostingDate(first, options);
 
       const consolRefId = await context.referenceNumberService.nextConsolRefId(this.scenario, companyCode, postingDate);
-      const sapRefDocument = null;
+      const sapRefDocument = '';
       const lineItems = [];
       let docRefItem = 1;
 
@@ -149,11 +150,14 @@ class PayoutConsolidationBuilder extends BaseScenarioBuilder {
       const header = this.createHeader({ consolRefId, sapRefDocument, groupRows, totals, options });
       const document = { header, lineItems, sourceTransactions: groupRows };
 
-      this.validateBalanced(document);
-      documents.push(document);
+      if (this.isBalanced(document)) {
+        documents.push(document);
+      } else {
+        unbalanced.push(document);
+      }
     }
 
-    return documents;
+    return { documents, unbalanced };
   }
 }
 

@@ -1,13 +1,5 @@
 'use strict';
 
-/**
- * Shared three-digit status/error mapping backed by MOBI_DB_STATUS.
- *
- * @sap/cds is required lazily (only inside ensureStatusTable) so the pure
- * helpers (toText / toCode / normalizeCode / concatErrorDetail / ...) can be
- * unit-tested and reused without a running database.
- */
-
 const STATUS = Object.freeze({
   // General processing
   '001': 'STARTED',

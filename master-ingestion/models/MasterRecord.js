@@ -9,11 +9,7 @@ function pick(row, keys) {
 }
 
 class MasterRecord {
-  /**
-   * Map a CSV row into a database-ready record.
-   * Raw values are retained (with _RAW suffix) so that validators can report
-   * length errors against the pre-truncation input.
-   */
+
   static fromCsvRow(row, rowNumber) {
     const rawId = pick(row, ['merchant_id', 'id']);
     const id = rawId.substring(0, 20);

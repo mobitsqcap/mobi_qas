@@ -26,8 +26,6 @@ class UnifiedIngestionHandler {
 
     const invalidFiles = fileinScan.filter((file) => !fileinFiles.includes(file));
 
-    // Requirement #2: the YYYYMMDD in the filename must be a real calendar date,
-    // and valid files are processed in ascending date order ("process date wise").
     const dateValidFiles = [];
     for (const file of fileinFiles) {
       const date8 = DateUtil.extractDate8(file.name);

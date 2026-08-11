@@ -1,6 +1,5 @@
 const cds = require('@sap/cds');
 const { v4: uuid } = require('uuid');
-
 const Constants = require('../utils/Constants');
 const StatusCodeUtil = require('../utils/StatusCodeUtil');
 const HashUtil = require('../utils/HashUtil');
@@ -8,7 +7,6 @@ const DateUtil = require('../utils/DateUtil');
 const ErrorMessageUtil = require('../utils/ErrorMessageUtil');
 const MasterRecord = require('../models/MasterRecord');
 const MasterValidator = require('./MasterValidator');
-
 const F = StatusCodeUtil.FRIENDLY;
 
 /**
@@ -22,10 +20,21 @@ const F = StatusCodeUtil.FRIENDLY;
  *   - duplicates already present in MOBI_DB_MASTER are REJECTED
  *   - valid records are inserted with STATUS_CODE '063' (BP_CREATED_SUCCESS)
  *     and the BP_NUMBER provided, so CPI will NOT try to create the BP again
+ *
+ * Audit writes (MOBI_DB_AUDIT) now follow the NEW audit table format
+ * (see AuditRepository / utils/AuditMessType.js):
+ *   - FILE summary row: AUDIT_LINE_ITEM = 1, PROCESS_TYPE = FILE
+ *   - record rows:      AUDIT_LINE_ITEM = 2,3,... (per-file sequence)
+ *   - MESSAGE_TYPE:        W / I / E / S (Warning / Info / Error / Success)
  */
 class MasterUploadService {
-
-  constructor({ masterRepository, fileLogRepository, auditRepository }) {
+  constructor({ masterRepository, fileLogRepository, auditRepository } = {}) {
+    if (!masterRepository || !fileLogRepository || !auditRepository) {
+      throw new Error(
+        'MasterUploadService requires { masterRepository, fileLogRepository, auditRepository }. ' +
+        'Construct it from cds.service.impl with these dependencies (see srv/master-upload-service.js).'
+      );
+    }
     Object.assign(this, { masterRepository, fileLogRepository, auditRepository });
     this.validator = new MasterValidator();
   }
@@ -34,7 +43,7 @@ class MasterUploadService {
    * @param {object} p
    * @param {Array}  p.records   UI payload (DB-style field names, see service .cds)
    * @param {string} p.fileName  uploaded file name (for traceability only)
-   * @param {string} p.actor     logged in user id
+   * @param {string} [p.actor]   logged in user id
    * @returns summary + per-row errors for the UI table
    */
   async processUpload({ records = [], fileName = 'Master_BP_Upload.xlsx', actor }) {
@@ -48,27 +57,31 @@ class MasterUploadService {
     const auditId = uuid();
     const fileId = HashUtil.sha256(`${fileName}|${now}`);
     const fileHash = HashUtil.sha256(JSON.stringify(records));
-    const changedBy = actor || Constants.SYSTEM_USERS.DEFAULT;
+    // Created-by is ALWAYS the system user for the master flow (audit/filelog/master rows)
+    const changedBy = Constants.SYSTEM_USERS.SFTP; // 'SYSTEM_SFTP'
 
     /* -------------------------------------------------------------- */
-    /* 1) Map UI payload -> MasterRecord (same shape as CSV ingestion)  */
+    /* 1) Map UI payload -> MasterRecord (same shape as CSV ingestion) */
     /* -------------------------------------------------------------- */
     const mapped = records.map((r, idx) =>
-      MasterRecord.fromCsvRow({
-        mobi_portal_code: r.MOBI_PORTAL_CODE,
-        sap_company_code: r.SAP_COMPANY_CODE,
-        id: r.ID,
-        external_bp_number: r.EXTERNAL_BP_NUMBER,
-        bp_number: r.BP_NUMBER,
-        type: r.TYPE,
-        name: r.MASTER_NAME,
-        address1: r.ADDRESS1,
-        postal_code: r.POSTAL_CODE,
-        country: r.COUNTRY,
-        country_code: r.COUNTRY_CODE,
-        business_reg_no_tin: r.BUSINESS_REG_NO_TIN,
-        host_name: r.HOST_NAME
-      }, idx + 2) // excel-style row number (row 1 = header)
+      MasterRecord.fromCsvRow(
+        {
+          mobi_portal_code: r.MOBI_PORTAL_CODE,
+          sap_company_code: r.SAP_COMPANY_CODE,
+          id: r.ID,
+          external_bp_number: r.EXTERNAL_BP_NUMBER,
+          bp_number: r.BP_NUMBER,
+          type: r.TYPE,
+          name: r.MASTER_NAME,
+          address1: r.ADDRESS1,
+          postal_code: r.POSTAL_CODE,
+          country: r.COUNTRY,
+          country_code: r.COUNTRY_CODE,
+          business_reg_no_tin: r.BUSINESS_REG_NO_TIN,
+          host_name: r.HOST_NAME
+        },
+        idx + 2 // excel-style row number (row 1 = header)
+      )
     );
 
     /* -------------------------------------------------------------- */
@@ -106,30 +119,35 @@ class MasterUploadService {
     /* 4) Full field validation (same rules as the SFTP ingestion)      */
     /* -------------------------------------------------------------- */
     const { validRecords, errorRows } = this.validator.validateRecords(candidates, { existingIdKeys });
-
-    const allErrors = [...errorRows, ...extraErrors]
-      .sort((a, b) => (Number(a.rowNo) || 0) - (Number(b.rowNo) || 0));
+    const allErrors = [...errorRows, ...extraErrors].sort(
+      (a, b) => (Number(a.rowNo) || 0) - (Number(b.rowNo) || 0)
+    );
 
     /* -------------------------------------------------------------- */
     /* 5) Insert valid records with STATUS_CODE '063'                   */
     /* -------------------------------------------------------------- */
     let inserted = 0;
     let insertError = null;
-
-    const enriched = validRecords.map((record, index) => ({
-      ...record,
-      AUDIT_ID: auditId,
-      FILE_ID: fileId,
-      FILE_NAME: fileName,
-      RECORD_NUMBER: index + 1,
-      POSTING_STATUS: '01',
-      STATUS_CODE: '063',          // BP_CREATED_SUCCESS -> CPI skips these
-      BP_CREATION_DATE: now,
-      ACTIVE_FLAG: Constants.ACTIVE_FLAG,
-      CREATED_BY: changedBy,
-      CREATED_TIMESTAMP: now,
-      CHANGED_BY: ' '
-    }));
+    const enriched = validRecords.map((record, index) => {
+      const copy = {
+        ...record,
+        AUDIT_ID: auditId,
+        FILE_ID: fileId,
+        FILE_NAME: fileName,
+        RECORD_NUMBER: index + 1,
+      
+        STATUS_CODE: '063',          // BP_CREATED_SUCCESS -> CPI skips these
+        BP_CREATION_DATE: now,
+        ACTIVE_FLAG: Constants.ACTIVE_FLAG,
+        CREATED_BY: changedBy,
+        CREATED_TIMESTAMP: now,
+        CHANGED_BY: ' '
+      };
+      // Spread does NOT copy non-enumerable properties; keep the CSV-style row
+      // number so the audit rows show the correct "Row N| ..." value.
+      Object.defineProperty(copy, '_rowNumber', { value: record._rowNumber, enumerable: false });
+      return copy;
+    });
 
     if (enriched.length) {
       try {
@@ -190,15 +208,28 @@ class MasterUploadService {
         auditId,
         runId: auditId,
         fileName,
-        createdBy: changedBy
+        createdBy: changedBy,
+        processName: 'MASTER_BP_UPLOAD',
+        processType: 'SFTP TO BTP'
       });
       await this.auditRepository.complete(
         auditId,
         { totalRows, validCount, errorCount },
         changedBy,
-        { errorDetail: errorDetail || undefined }
+        { errorDetail: errorDetail || undefined, fileName }
       );
-      await this._insertRecordAuditRows({ auditId, validRecords: enriched.slice(0, inserted), errorRows: allErrors, fileName, changedBy, startedAt: now });
+      await this.auditRepository.insertRecordRows({
+        auditId,
+        runId: auditId,
+        fileName,
+        validRecords: enriched.slice(0, inserted),
+        errorRows: allErrors,
+        inserted: true,
+        processStartAt: now,
+        changedBy,
+        processName: 'MASTER_BP_UPLOAD',
+        processType: 'SFTP TO BTP'
+      });
     } catch (auditErr) {
       console.warn(`[MasterUploadService] audit write failed: ${auditErr.message}`);
     }
@@ -206,9 +237,10 @@ class MasterUploadService {
     /* -------------------------------------------------------------- */
     /* 7) Result back to the UI                                         */
     /* -------------------------------------------------------------- */
-    const message = errorCount === 0
-      ? `${inserted} record(s) inserted into MOBI_DB_MASTER with STATUS_CODE 063 (BP_CREATED_SUCCESS).`
-      : `${inserted} of ${totalRows} record(s) inserted. ${errorCount} record(s) rejected (see errors).`;
+    const message =
+      errorCount === 0
+        ? `${inserted} record(s) inserted into MOBI_DB_MASTER with STATUS_CODE 063 (BP_CREATED_SUCCESS).`
+        : `${inserted} of ${totalRows} record(s) inserted. ${errorCount} record(s) rejected (see errors).`;
 
     return {
       totalRows,
@@ -227,9 +259,10 @@ class MasterUploadService {
   /** composite-key set (portal|company|id) - same logic as UnifiedIngestionHandler */
   async _loadExistingIdKeys(candidates) {
     const keySet = new Set();
-    const ids = [...new Set((candidates || []).map((r) => String(r.ID || '').trim()).filter(Boolean))];
+    const ids = [
+      ...new Set((candidates || []).map((r) => String(r.ID || '').trim()).filter(Boolean))
+    ];
     if (!ids.length) return keySet;
-
     try {
       const db = await cds.connect.to('db');
       const { SELECT } = cds.ql;
@@ -248,60 +281,6 @@ class MasterUploadService {
       console.warn(`[MasterUploadService] existing-key preload failed: ${e.message}`);
     }
     return keySet;
-  }
-
-  /** record-level audit rows (PROCESS_TYPE = 'PORTAL TO BTP') */
-  async _insertRecordAuditRows({ auditId, validRecords, errorRows, fileName, changedBy, startedAt }) {
-    const db = await cds.connect.to('db');
-    const { INSERT } = cds.ql;
-    const now = DateUtil.nowTimestamp();
-    const entries = [];
-
-    for (const r of validRecords) {
-      entries.push({
-        AUDIT_ID: uuid(),
-        PROCESS_ID: String(auditId).substring(0, 50),
-        PROCESS_NAME: 'MASTER_BP_UPLOAD',
-        PROCESS_TYPE: 'PORTAL TO BTP',
-        OBJECT_ID: String(r.EXTERNAL_BP_NUMBER || r.ID || '').substring(0, 100),
-        OBJECT_NAME: String(r.BP_NUMBER || r.MASTER_NAME || r.ID || '').substring(0, 100),
-        STATUS_CODE: '063',
-        STATUS_MESSAGE: `${StatusCodeUtil.toText('063')}: BP ${r.BP_NUMBER} already created in Public Cloud; uploaded manually from Master BP Upload app.`,
-        START_TIME: startedAt || now,
-        END_TIME: now,
-        CREATED_BY: String(changedBy || Constants.SYSTEM_USERS.DEFAULT).substring(0, 50),
-        CREATED_TIMESTAMP: now
-      });
-    }
-
-    for (const e of errorRows) {
-      entries.push({
-        AUDIT_ID: uuid(),
-        PROCESS_ID: String(auditId).substring(0, 50),
-        PROCESS_NAME: 'MASTER_BP_UPLOAD',
-        PROCESS_TYPE: 'PORTAL TO BTP',
-        OBJECT_ID: String(e.mobiReferenceId || `ROW_${e.rowNo || 'UNKNOWN'}`).substring(0, 100),
-        OBJECT_NAME: String(
-          e.mobiReferenceId ? `${e.mobiReferenceId} (Row ${e.rowNo})` : `Row ${e.rowNo || 'UNKNOWN'}`
-        ).substring(0, 100),
-        STATUS_CODE: '004', // FAILED
-        STATUS_MESSAGE: String(`[CODES: ${e.errorCode || ''}] ${e.errorDetail || ''}`).substring(0, 500),
-        START_TIME: startedAt || now,
-        END_TIME: now,
-        CREATED_BY: String(changedBy || Constants.SYSTEM_USERS.DEFAULT).substring(0, 50),
-        CREATED_TIMESTAMP: now
-      });
-    }
-
-    const chunkSize = Number(process.env.AUDIT_CHUNK_SIZE || 500);
-    for (let i = 0; i < entries.length; i += chunkSize) {
-      const chunk = entries.slice(i, i + chunkSize);
-      try {
-        await db.run(INSERT.into('mobi.db.MOBI_DB_AUDIT').entries(chunk));
-      } catch (err) {
-        console.error(`[MasterUploadService] audit rows ${i}-${i + chunk.length} failed: ${err.message}`);
-      }
-    }
   }
 }
 

@@ -1,66 +1,55 @@
 'use strict';
 
 const cds = require('@sap/cds');
-const { INSERT, UPSERT, UPDATE, DELETE } = cds.ql;
+const { INSERT, UPDATE, DELETE } = cds.ql;
 
-const { v4: uuid } = require('uuid');
-
-const DateUtil = require('../utils/DateUtil');
 const StatusCodeUtil = require('../utils/StatusCodeUtil');
+const DateUtil = require('../utils/DateUtil');
 
 const ENTITY = 'mobi.db.MOBI_DB_AUDIT';
 const WRITE_CHUNK_SIZE = 500;
 
 /**
- * Summary + row-level audit using the unchanged MOBI_DB_AUDIT schema.
+ * Per-row audit entries are written ONCE — at the end of the run — with their
+ * final insert/validation result. There is no intermediate "processing" write
+ * (which previously confused the two-step processing-vs-insert view). Each
+ * per-row message follows the format:
+ *   "Row N | Mobi Ref ID: <value> | <message>"
  *
- * Summary row:
- *   AUDIT_ID    = FILELOG.AUDIT_ID
- *   PROCESS_ID  = FILELOG.AUDIT_ID
- *   OBJECT_ID   = source filename
- *   OBJECT_NAME = FILE_SUMMARY
- *
- * Detail rows:
- *   AUDIT_ID    = unique UUID per CSV transaction
- *   PROCESS_ID  = FILELOG.AUDIT_ID (shared grouping value)
- *   OBJECT_ID   = source filename
- *   OBJECT_NAME = MOBI_REFERENCE_ID, or ROW_<number> when unavailable
- *
- * STATUS_CODE always contains one three-digit code. Full multi-error details
- * are preserved in the companion text report; AUDIT stores a concise summary.
+ * MOBI_DB_AUDIT key is (AUDIT_ID, AUDIT_LINE_ITEM). AUDIT_LINE_ITEM is a
+ * sequential integer (1, 2, 3…) within one AUDIT_ID run.
  */
 class AuditRepository {
   constructor() {
-    this.metadata = new Map();
+    this.lineItemCounters = new Map();
+  }
+
+  _nextAuditLineItem(auditId) {
+    const key = String(auditId);
+    const next = (this.lineItemCounters.get(key) || 0) + 1;
+    this.lineItemCounters.set(key, next);
+    return next;
   }
 
   async start({ auditId, runId, fileName, createdBy }) {
     const db = await cds.connect.to('db');
     const now = DateUtil.nowTimestamp();
 
-    const meta = {
-      auditId: String(auditId),
-      processId: String(auditId).slice(0, 50),
-      fileName: String(fileName || '').slice(0, 100),
-      createdBy: String(createdBy || 'SYSTEM_SFTP').slice(0, 50),
-      startTime: now
-    };
-    this.metadata.set(String(auditId), meta);
+    this.lineItemCounters.set(String(auditId), 0);
+    const lineItemNo = this._nextAuditLineItem(auditId);
 
-    await db.run(DELETE.from(ENTITY).where({ PROCESS_ID: meta.processId }));
     await db.run(DELETE.from(ENTITY).where({ AUDIT_ID: auditId }));
 
-    const code = StatusCodeUtil.toCode('STARTED');
-    await db.run(
-      INSERT.into(ENTITY).entries(this._entry({
-        meta,
-        rowAuditId: meta.auditId,
-        objectName: 'FILE_SUMMARY',
-        statusCode: code,
-        statusMessage: `File audit started for ${meta.fileName}.`,
-        endTime: null
-      }))
-    );
+    await db.run(INSERT.into(ENTITY).entries({
+      AUDIT_ID: auditId,
+      AUDIT_LINE_ITEM: lineItemNo,
+      PROCESS_NAME: 'TRANSACTION_INGESTION',
+      PROCESS_TYPE: 'FILE',
+      MESSAGE_TYPE: 'I',
+      STATUS_MESSAGE: `File ${fileName} received — processing started.`,
+      CREATED_BY: String(createdBy || 'SYSTEM_SFTP').slice(0, 100),
+      CREATED_TIMESTAMP: now
+    }));
   }
 
   async markProcessing(auditId, stats = {}) {
@@ -69,158 +58,115 @@ class AuditRepository {
 
   async updateProgress(auditId, stats = {}) {
     const db = await cds.connect.to('db');
-    const code = StatusCodeUtil.toCode('PROCESSING');
-    await db.run(
-      UPDATE(ENTITY).set({
-        STATUS_CODE: code,
-        STATUS_MESSAGE: this._summaryMessage('PROCESSING', stats)
-      }).where({ AUDIT_ID: auditId })
-    );
+    await db.run(UPDATE(ENTITY).set({
+      MESSAGE_TYPE: 'I',
+      STATUS_MESSAGE: this._summaryMessage('PROCESSING', stats)
+    }).where({ AUDIT_ID: auditId, AUDIT_LINE_ITEM: 1 }));
   }
 
+  /**
+   * Reserve an AUDIT_LINE_ITEM for every record and clear any stale per-row
+   * rows, but do NOT write per-row rows yet. They are written once, at the end,
+   * by finalizeRows() with the final result.
+   */
   async initializeRows(auditId, fileName, records) {
     const db = await cds.connect.to('db');
-    const meta = this._meta(auditId, fileName);
-    const code = StatusCodeUtil.toCode('PROCESSING');
+
+    await db.run(DELETE.from(ENTITY).where({ AUDIT_ID: auditId, AUDIT_LINE_ITEM: { '>': 1 } }));
+
+    (records || []).forEach((record) => {
+      if (!record._AUDIT_LINE_ITEM) {
+        record._AUDIT_LINE_ITEM = this._nextAuditLineItem(auditId);
+      }
+    });
+  }
+
+  /**
+   * Write each per-row entry ONCE, with its final result. Clears any stale
+   * per-row rows first (defensive), then INSERTs the final rows.
+   */
+  async finalizeRows(auditId, fileName, records, options = {}) {
+    const db = await cds.connect.to('db');
     const now = DateUtil.nowTimestamp();
 
-    await db.run(DELETE.from(ENTITY).where({ PROCESS_ID: meta.processId }));
+    const invalidCount = (records || []).filter((r) => r.ROW_STATUS === 'INVALID').length;
+    const validCount = (records || []).length - invalidCount;
 
-    const entries = [
-      this._entry({
-        meta,
-        rowAuditId: meta.auditId,
-        objectName: 'FILE_SUMMARY',
-        statusCode: code,
-        statusMessage: this._summaryMessage('PROCESSING', {
-          totalRows: records?.length || 0,
-          validCount: 0,
-          errorCount: 0
-        }),
-        endTime: null,
-        createdTimestamp: now
-      })
-    ];
+    // FILE summary (AUDIT_LINE_ITEM = 1) — include the file name
+    const summaryMessageType = options.fileRejected ? 'W' : 'S';
+    const summaryMessage = options.fileRejected
+      ? `File ${fileName} rejected. total=${records.length}, errors=${invalidCount}, valid_not_inserted=${validCount}.`
+      : `File ${fileName} completed successfully. total=${records.length}, inserted=${records.length}, errors=0.`;
 
-    (records || []).forEach((record, index) => {
-      record._AUDIT_RECORD_ID = uuid();
-      const rowNumber = record._ROW_NUMBER || index + 2;
-      entries.push(this._entry({
-        meta,
-        rowAuditId: record._AUDIT_RECORD_ID,
-        record,
-        rowNumber,
-        statusCode: code,
-        statusMessage: this._detailMessage(record, {
-          rowNumber,
-          status: 'PROCESSING',
-          resultCode: code,
-          detail: 'Transaction record is being validated.'
-        }),
-        endTime: null,
-        createdTimestamp: now
-      }));
-    });
+    await db.run(UPDATE(ENTITY).set({
+      MESSAGE_TYPE: summaryMessageType,
+      STATUS_MESSAGE: summaryMessage.slice(0, 500)
+    }).where({ AUDIT_ID: auditId, AUDIT_LINE_ITEM: 1 }));
+
+    // Per-row rows are written only here, once, with the final result.
+    await db.run(DELETE.from(ENTITY).where({ AUDIT_ID: auditId, AUDIT_LINE_ITEM: { '>': 1 } }));
+
+    const entries = [];
+    for (const record of (records || [])) {
+      const lineItemNo = record._AUDIT_LINE_ITEM || this._nextAuditLineItem(auditId);
+
+      let messageType;
+      let messageText;
+
+      if (options.fileRejected) {
+        if (record.ROW_STATUS === 'INVALID') {
+          messageType = 'E';
+          messageText = StatusCodeUtil.recordErrorDetail(record) || 'Record failed validation.';
+        } else {
+          messageType = 'W';
+          messageText = 'Row was valid but not inserted (another row caused file rejection).';
+        }
+      } else {
+        messageType = 'S';
+        messageText = 'Data Inserted Successfully';
+      }
+
+      entries.push({
+        AUDIT_ID: auditId,
+        AUDIT_LINE_ITEM: lineItemNo,
+        PROCESS_NAME: 'TRANSACTION_INGESTION',
+        PROCESS_TYPE: 'SFTP TO BTP',
+        MESSAGE_TYPE: messageType,
+        STATUS_MESSAGE: this._rowMessage(record, messageText, { rowNumber: record._ROW_NUMBER }),
+        CREATED_BY: 'SYSTEM_SFTP',
+        CREATED_TIMESTAMP: now
+      });
+    }
 
     await this._writeChunks(db, INSERT, entries);
   }
 
-  async finalizeRows(auditId, fileName, records, options = {}) {
-    const db = await cds.connect.to('db');
-    const meta = this._meta(auditId, fileName);
-    const now = DateUtil.nowTimestamp();
-
-    const validationFailed = StatusCodeUtil.toCode('VALIDATION_FAILED');
-    const transactionSuccess = StatusCodeUtil.toCode('TRANSACTION_SUCCESS');
-    const completed = StatusCodeUtil.toCode('COMPLETED');
-
-    const invalidCount = (records || []).filter((record) => record.ROW_STATUS === 'INVALID').length;
-    const validCount = (records || []).length - invalidCount;
-    const summaryCode = options.fileRejected ? validationFailed : completed;
-
-    const entries = [
-      this._entry({
-        meta,
-        rowAuditId: meta.auditId,
-        objectName: 'FILE_SUMMARY',
-        statusCode: summaryCode,
-        statusMessage: options.fileRejected
-          ? `File rejected. total=${records.length}, row_errors=${invalidCount}, otherwise_valid_not_inserted=${validCount}.`
-          : `File completed successfully. total=${records.length}, inserted=${records.length}, errors=0.`,
-        endTime: now
-      })
-    ];
-
-    (records || []).forEach((record, index) => {
-      const rowNumber = record._ROW_NUMBER || index + 2;
-      let status;
-      let auditCode;
-      let detail;
-
-      if (options.fileRejected) {
-        status = 'FAILED';
-        if (record.ROW_STATUS === 'INVALID') {
-          auditCode = this._singleCode(record.STATUS_CODE, validationFailed);
-          detail = this._allErrorDetail(record) || 'Record failed validation.';
-        } else {
-          auditCode = validationFailed;
-          detail = 'Row was valid but was not inserted because another row caused complete-file rejection.';
-        }
-      } else {
-        // Successfully inserted transaction -> 041 TRANSACTION_SUCCESS.
-        status = 'SUCCESS';
-        auditCode = transactionSuccess;
-        detail = 'TRANSACTION SUCCESS';
-      }
-
-      entries.push(this._entry({
-        meta,
-        rowAuditId: record._AUDIT_RECORD_ID || uuid(),
-        record,
-        rowNumber,
-        statusCode: auditCode,
-        statusMessage: options.fileRejected
-          ? this._errorAuditMessage(rowNumber, detail)
-          : detail,
-        endTime: now
-      }));
-    });
-
-    await this._writeChunks(db, UPSERT, entries);
-  }
-
   async recordFileFailure(auditId, fileName, rawRows, error) {
     const db = await cds.connect.to('db');
-    const meta = this._meta(auditId, fileName);
-    const code = this._singleCode(error?.code, StatusCodeUtil.toCode('UNKNOWN_ERROR'));
-    const detail = String(error?.message || StatusCodeUtil.toText(code));
     const now = DateUtil.nowTimestamp();
+    const detail = String(error?.message || 'File failed');
     const sourceRows = rawRows || [];
 
-    await db.run(DELETE.from(ENTITY).where({ PROCESS_ID: meta.processId }));
+    // FILE summary — include the file name
+    await db.run(UPDATE(ENTITY).set({
+      MESSAGE_TYPE: 'E',
+      STATUS_MESSAGE: `File ${fileName} failed. rows=${sourceRows.length}, detail=${detail}`.slice(0, 500)
+    }).where({ AUDIT_ID: auditId, AUDIT_LINE_ITEM: 1 }));
 
-    const entries = [
-      this._entry({
-        meta,
-        rowAuditId: meta.auditId,
-        objectName: 'FILE_SUMMARY',
-        statusCode: code,
-        statusMessage: `File failed. code=${StatusCodeUtil.toText(code)}, rows=${sourceRows.length}, detail=${detail}`,
-        endTime: now
-      })
-    ];
-
-    sourceRows.forEach((raw, index) => {
-      const rowNumber = index + 2;
-      entries.push(this._entry({
-        meta,
-        rowAuditId: uuid(),
-        raw,
-        rowNumber,
-        statusCode: code,
-        statusMessage: this._errorAuditMessage(rowNumber, detail),
-        endTime: now
-      }));
+    // Create per-row error rows (new AUDIT_LINE_ITEM values, no conflict)
+    const entries = sourceRows.map((raw, index) => {
+      const lineItemNo = this._nextAuditLineItem(auditId);
+      const rowNumber = raw?._ROW_NUMBER || index + 2;
+      return {
+        AUDIT_ID: auditId,
+        AUDIT_LINE_ITEM: lineItemNo,
+        PROCESS_NAME: 'TRANSACTION_INGESTION',
+        PROCESS_TYPE: 'SFTP TO BTP',
+        MESSAGE_TYPE: 'E',
+        STATUS_MESSAGE: this._rowMessage(raw, detail, { rowNumber }),
+        CREATED_BY: 'SYSTEM_SFTP',
+        CREATED_TIMESTAMP: now
+      };
     });
 
     await this._writeChunks(db, INSERT, entries);
@@ -229,119 +175,50 @@ class AuditRepository {
   async complete(auditId, result = {}, changedBy, options = {}) {
     const db = await cds.connect.to('db');
     const failed = Number(result.errorCount || 0) > 0;
-    const code = failed
-      ? this._singleCode(options.errorCode, StatusCodeUtil.toCode('VALIDATION_FAILED'))
-      : StatusCodeUtil.toCode('COMPLETED');
-    await db.run(
-      UPDATE(ENTITY).set({
-        STATUS_CODE: code,
-        STATUS_MESSAGE: String(options.errorDetail || StatusCodeUtil.toText(code)).slice(0, 500),
-        END_TIME: DateUtil.nowTimestamp()
-      }).where({ AUDIT_ID: auditId })
-    );
+    const messageType = failed ? 'E' : 'S';
+    const message = String(options.errorDetail || (failed ? 'File completed with errors' : 'File completed successfully')).slice(0, 500);
+    await db.run(UPDATE(ENTITY).set({
+      MESSAGE_TYPE: messageType,
+      STATUS_MESSAGE: message
+    }).where({ AUDIT_ID: auditId, AUDIT_LINE_ITEM: 1 }));
   }
 
   async fail(auditId, error) {
     const db = await cds.connect.to('db');
-    const code = this._singleCode(error?.code, StatusCodeUtil.toCode('UNKNOWN_ERROR'));
-    await db.run(
-      UPDATE(ENTITY).set({
-        STATUS_CODE: code,
-        STATUS_MESSAGE: String(error?.message || StatusCodeUtil.toText(code)).slice(0, 500),
-        END_TIME: DateUtil.nowTimestamp()
-      }).where({ AUDIT_ID: auditId })
-    );
-  }
-
-  _entry({
-    meta,
-    rowAuditId,
-    record = null,
-    raw = null,
-    rowNumber = 0,
-    objectName = null,
-    statusCode,
-    statusMessage,
-    endTime,
-    createdTimestamp = null
-  }) {
-    const source = raw || record?._RAW_ROW || {};
-    const mobiReference = String(source.mobi_reference_id ?? record?.MOBI_REFERENCE_ID ?? '').trim();
-    const isSummary = objectName === 'FILE_SUMMARY';
-
-    return {
-      AUDIT_ID: rowAuditId,
-      PROCESS_ID: meta.processId,
-      PROCESS_NAME: 'TRANSACTION_INGESTION',
-      PROCESS_TYPE: isSummary ? 'SFTP' : 'PORTAL TO BTP',
-      OBJECT_ID: isSummary
-        ? meta.fileName
-        : String(mobiReference || `ROW_${rowNumber || 0}`).slice(0, 100),
-      OBJECT_NAME: isSummary
-        ? 'FILE_SUMMARY'
-        : String(mobiReference || `ROW_${rowNumber || 0}`).slice(0, 100),
-      STATUS_CODE: this._singleCode(statusCode, StatusCodeUtil.toCode('UNKNOWN_ERROR')),
-      STATUS_MESSAGE: String(statusMessage || '').slice(0, 500),
-      START_TIME: meta.startTime,
-      END_TIME: endTime,
-      CREATED_BY: meta.createdBy,
-      CREATED_TIMESTAMP: createdTimestamp || meta.startTime
-    };
-  }
-
-  _detailMessage(record, options = {}) {
-    const source = options.raw || record?._RAW_ROW || {};
-    const value = (rawName, recordName) =>
-      String(source[rawName] ?? record?.[recordName] ?? '').replace(/[\r\n|]+/g, ' ').trim();
-
-    return [
-      `ROW_NO=${options.rowNumber || ''}`,
-      `PAYMENT_TYPE=${value('payment_type', 'PAYMENT_TYPE')}`,
-      `COMPANY_CODE=${value('sap_company_code', 'COMPANY_CODE')}`,
-      `MOBI_PORTAL_CODE=${value('mobi_portal_code', 'MOBI_PORTAL_CODE')}`,
-      `STATUS=${options.status || ''}`,
-      `RESULT_CODE=${StatusCodeUtil.toText(this._singleCode(options.resultCode, '100'))}`,
-      `DETAIL=${String(options.detail || '').replace(/[\r\n]+/g, ' ').trim()}`
-    ].join(' | ').slice(0, 500);
-  }
-
-  _errorAuditMessage(rowNumber, detail) {
-    const clean = String(detail || '')
-      .replace(/\[\d+\]\s*\(\d{3}\)\s*/g, '')
-      .replace(/[\r\n]+/g, ' ')
-      .trim();
-    return `E | ROW_NO=${rowNumber || ''} | ${clean}`.slice(0, 500);
-  }
-
-  _allErrorDetail(record) {
-    // Same canonical detail used by the error text file -> audit and text file
-    // always agree on a record's error description.
-    return StatusCodeUtil.recordErrorDetail(record);
-  }
-
-  _singleCode(value, fallback) {
-    const first = String(value || '').split(',').map((code) => code.trim()).find(Boolean);
-    return StatusCodeUtil.normalizeCode(first, StatusCodeUtil.toText(fallback || '100')).slice(0, 3);
+    const message = String(error?.message || 'File failed').slice(0, 500);
+    await db.run(UPDATE(ENTITY).set({
+      MESSAGE_TYPE: 'E',
+      STATUS_MESSAGE: message
+    }).where({ AUDIT_ID: auditId, AUDIT_LINE_ITEM: 1 }));
   }
 
   _summaryMessage(status, stats = {}) {
-    return `${status}; total=${Number(stats.totalRows || 0)},` +
-      `valid=${Number(stats.validCount || 0)}, errors=${Number(stats.errorCount || 0)}`;
+    return `${status}; total=${Number(stats.totalRows || 0)}, valid=${Number(stats.validCount || 0)}, errors=${Number(stats.errorCount || 0)}`.slice(0, 500);
   }
 
-  _meta(auditId, fileName = '') {
-    return this.metadata.get(String(auditId)) || {
-      auditId: String(auditId),
-      processId: String(auditId).slice(0, 50),
-      fileName: String(fileName || '').slice(0, 100),
-      createdBy: 'SYSTEM_SFTP',
-      startTime: DateUtil.nowTimestamp()
-    };
+  /** Resolve the Mobi reference id from a validated record or a raw CSV row. */
+  _mobiRef(record) {
+    const raw = record?._RAW_ROW || {};
+    const value = record?.MOBI_REFERENCE_ID ?? raw.mobi_reference_id ?? raw.MOBI_REFERENCE_ID ?? '';
+    return String(value).replace(/[\r\n|]+/g, ' ').trim();
+  }
+
+  /**
+   * Canonical per-row message: "Row N | Mobi Ref ID: <value> | <message>".
+   * Newlines are stripped (pipes are preserved so "CODE: msg || CODE: msg"
+   * error detail separators survive).
+   */
+  _rowMessage(record, messageText, options = {}) {
+    const rowNumber = options.rowNumber ?? record?._ROW_NUMBER ?? '';
+    const ref = this._mobiRef(record);
+    const refPart = ref ? `Mobi Ref ID: ${ref}` : 'Mobi Ref ID: N/A';
+    const text = String(messageText ?? '').replace(/[\r\n]+/g, ' ').trim();
+    return `Row ${rowNumber} | ${refPart} | ${text}`.slice(0, 500);
   }
 
   async _writeChunks(db, operation, entries) {
-    for (let index = 0; index < entries.length; index += WRITE_CHUNK_SIZE) {
-      await db.run(operation.into(ENTITY).entries(entries.slice(index, index + WRITE_CHUNK_SIZE)));
+    for (let i = 0; i < entries.length; i += WRITE_CHUNK_SIZE) {
+      await db.run(operation.into(ENTITY).entries(entries.slice(i, i + WRITE_CHUNK_SIZE)));
     }
   }
 }

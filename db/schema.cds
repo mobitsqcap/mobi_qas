@@ -33,7 +33,6 @@ entity MOBI_DB_MASTER {
       BUSINESS_PARTNER_ROLE       : String(20);
       SALES_ORGANIZATION          : String(4);
       ACTIVE_FLAG                 : String(1);
-      // POSTING_STATUS              : String(2);
       STATUS_CODE                 : String(3);
       FILE_ID                     : String(64);
       FILE_NAME                   : String(100);
@@ -47,16 +46,12 @@ entity MOBI_DB_MASTER {
 
 entity MOBI_DB_AUDIT {
   key AUDIT_ID          : UUID;
-      PROCESS_ID        : String(50);
+  key AUDIT_LINE_ITEM   : Integer;
       PROCESS_NAME      : String(50);
       PROCESS_TYPE      : String(20);
-      OBJECT_ID         : String(100);
-      OBJECT_NAME       : String(100);
-      STATUS_CODE       : String(3);
+      MESSAGE_TYPE      : String(1);
       STATUS_MESSAGE    : String(500);
-      START_TIME        : Timestamp;
-      END_TIME          : Timestamp;
-      CREATED_BY        : String(50);
+      CREATED_BY        : String(100);
       CREATED_TIMESTAMP : Timestamp;
 }
 
@@ -93,11 +88,8 @@ entity MOBI_DB_TRANSACTION {
       SETTLED_IN_CURRENCY   : String(3);
       CONVERSION_RATE       : Decimal(20, 8);
       COUNTRY_CODE          : String(2);
-      //CONSOL_STATUS         : String(20);
       CONSOL_REF_ID         : String(50);
-      //ROW_STATUS            : String(20);
       STATUS_CODE           : String(20);
-      //STATUS_MESSAGE        : String(500);
       CREATED_BY            : String(100);
       CREATED_TIMESTAMP     : Timestamp;
       CHANGED_BY            : String(100);
@@ -144,6 +136,7 @@ entity MOBI_DB_FILEBATCH {
 
 entity MOBI_DB_CONSOLIDATIONHEADER {
   key CONSOL_REF_ID       : String(50);
+      AUDIT_ID            : String(36);
       SAP_REF_DOCUMENT    : String(20);
       COMPANY_CODE        : String(4);
       MOBI_PORTAL_CODE    : String(2);
@@ -156,12 +149,9 @@ entity MOBI_DB_CONSOLIDATIONHEADER {
       TOTAL_DEBIT_AMOUNT  : Decimal(18, 2);
       TOTAL_CREDIT_AMOUNT : Decimal(18, 2);
       CURRENCY            : String(3);
-      // POSTING_STATUS      : String(2);
       POST_DATE           : Timestamp;
       HTTP_STATUS         : Integer;
-      // ERROR_CODE          : String(2);
-      // ERROR_DETAIL        : String(255);
-      STATUS_CODE      : String(3);
+      STATUS_CODE         : String(3);
       RETRY_COUNT         : Integer;
       CREATED_BY          : String(100);
       CREATED_TIMESTAMP   : Timestamp;
@@ -172,6 +162,7 @@ entity MOBI_DB_CONSOLIDATIONHEADER {
 entity MOBI_DB_CONSOLIDATIONLINEITEM {
   key CONSOL_REF_ID          : String(50);
   key DOC_REF_ITEM           : Integer;
+      AUDIT_ID               : String(36);
       SAP_REF_DOCUMENT       : String(20);
       COMPANY_CODE           : String(4);
       MOBI_PORTAL_CODE       : String(2);
@@ -197,33 +188,31 @@ entity MOBI_DB_CONSOLIDATIONLINEITEM {
       COST_CENTER            : String(10);
       PROFIT_CENTER          : String(10);
       DOCUMENT_TYPE          : String(2);
-      //POSTING_STATUS         : String(2);
       POST_DATE              : Timestamp;
       HTTP_STATUS            : Integer;
-      //ERROR_CODE             : String(2);
-     //ERROR_DETAIL           : String(255);
-      STATUS_CODE      : String(3);
+      STATUS_CODE            : String(3);
       RETRY_COUNT            : Integer;
       CREATED_BY             : String(100);
       CREATED_TIMESTAMP      : Timestamp;
       CHANGED_BY             : String(100);
       CHANGED_TIMESTAMP      : Timestamp;
 }
+
 entity MOBI_DB_GLAccounts {
-    key GUID              : String(36);
-    key GL_Accounts       : String(8);
-        COMPANY_CODE      : String(4);
-        PAYMENT_TYPE      : String(20);
-        PAYMENT_SUB_TYPE  : String(30);
-        HOST_NAME         : String(15);
-        TXN_AMOUNT        : String(1);
-        HOST_MDR_AMOUNT   : String(1);
-        HOST_FEE_PAYABLE  : String(1);
-        MOBI_MDR_AMOUNT   : String(1);
-        MDR_REVENUE       : String(1);
-        Status            : String(2); // 2-digit code (01=ACTIVE)
-        CREATED_BY        : String(100);
-        CREATED_TIMESTAMP : Timestamp;
-        CHANGED_BY        : String(100);
-        CHANGED_TIMESTAMP : Timestamp;
+  key GUID              : String(36);
+  key GL_Accounts       : String(8);
+      COMPANY_CODE      : String(4);
+      PAYMENT_TYPE      : String(20);
+      PAYMENT_SUB_TYPE  : String(30);
+      HOST_NAME         : String(15);
+      TXN_AMOUNT        : String(1);
+      HOST_MDR_AMOUNT   : String(1);
+      HOST_FEE_PAYABLE  : String(1);
+      MOBI_MDR_AMOUNT   : String(1);
+      MDR_REVENUE       : String(1);
+      Status            : String(2);
+      CREATED_BY        : String(100);
+      CREATED_TIMESTAMP : Timestamp;
+      CHANGED_BY        : String(100);
+      CHANGED_TIMESTAMP : Timestamp;
 }

@@ -1,9 +1,4 @@
-/**
- * Constants for Master BP Ingestion Flow.
- *
- * Status/error codes are 2-digit codes stored in DB tables. Human-readable
- * text lives in MOBI_DB_STATUS (see db/schema.cds and ./StatusCodeUtil).
- */
+
 const Status = require('./StatusCodeUtil');
 
 const masterPattern      = process.env.MASTER_FILE_PATTERN      || /^Master_\d{8}\.csv$/;

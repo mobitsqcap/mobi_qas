@@ -11,8 +11,6 @@ module.exports = Object.freeze({
   ACTIVE_FLAG: process.env.ACTIVE_FLAG || 'X',
   MAX_REF_ID_LENGTH: 100,
 
-  // Requirement #3: only these company / portal codes are accepted; anything
-  // else rejects the whole file (see TechnicalValidator).
   ALLOWED_COMPANY_CODES: Object.freeze(new Set(['1000', '2000', '3000', '4000', '5000'])),
   VALID_PORTAL_CODES: Object.freeze(new Set(['SG', 'MY', 'IN', 'ID', 'AE'])),
 
