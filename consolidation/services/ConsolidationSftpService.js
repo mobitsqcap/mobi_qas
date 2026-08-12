@@ -2,7 +2,7 @@
 
 /**
  * Lightweight SFTP client used by the consolidation module to publish the
- * consolidation error report (Requirement #5). Reuses the same SFTP_MOBI
+ * consolidation error report (Requirement #5). Reuses the same SFTP_MOBI_QAS
  * destination as ingestion.
  */
 

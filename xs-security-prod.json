@@ -16,7 +16,7 @@
       "name": "$XSAPPNAME.Jobs",
       "description": "SAP Job Scheduling service scope",
       "grant-as-authority-to-apps": [
-        "$XSSERVICENAME(mobi_job_prod)"
+        "$XSSERVICENAME( )"
       ]
     }
   ],

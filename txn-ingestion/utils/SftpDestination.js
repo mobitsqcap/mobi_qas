@@ -18,8 +18,8 @@ function normalizeHost(value) {
 }
 
 async function getSFTPDestination() {
-  const destination = await getDestination({ destinationName: 'SFTP_MOBI' });
-  if (!destination) throw new Error('Destination SFTP_MOBI not found');
+  const destination = await getDestination({ destinationName: 'SFTP_MOBI_QAS' });
+  if (!destination) throw new Error('Destination SFTP_MOBI_QAS not found');
 
   const properties = destination.originalProperties || {};
   const config = {
@@ -35,7 +35,7 @@ async function getSFTPDestination() {
 
   const missing = ['host', 'username', 'password'].filter((key) => !config[key]);
   if (missing.length) {
-    throw new Error(`Destination SFTP_MOBI missing properties: ${missing.join(', ')}`);
+    throw new Error(`Destination SFTP_MOBI_QAS missing properties: ${missing.join(', ')}`);
   }
   return config;
 }

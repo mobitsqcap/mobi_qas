@@ -1,5 +1,5 @@
 {
-  "xsappname": "mobi_dev_cap-MOBIVERSA_PRIVATE_LIMITED-Mobi_dev_space",
+  "xsappname": "mobi_dev_cap-MOBIVERSA_PRIVATE_LIMITED-Mobi_qas_space",
   "tenant-mode": "dedicated",
   "scopes": [
     {
@@ -18,7 +18,7 @@
       "name": "$XSAPPNAME.Jobs",
       "description": "SAP Job Scheduling service scope",
       "grant-as-authority-to-apps": [
-        "$XSSERVICENAME(mobi_job_dev)"
+        "sb-aa7f72e4-c620-4a40-872b-0a7ad5e7beeb!b632356|sap-jobscheduler!b1"
       ]
     }
   ],
