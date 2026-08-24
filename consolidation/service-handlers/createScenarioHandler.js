@@ -1,6 +1,5 @@
 'use strict';
 
-
 const cds = require('@sap/cds');
 const { v4: uuid } = require('uuid');
 
@@ -18,8 +17,6 @@ let infra;
 try { infra = require('../../infra'); } catch (_) { infra = null; }
 
 const log = infra?.Logger ? new infra.Logger('ConsolScenario') : console;
-
-const LOCK_SCOPE_CONSOLIDATION = 'consolidation';
 const serviceCache = new Map();
 
 function getConsolidationService(scenarioCode) {
@@ -38,29 +35,6 @@ function getConsolidationService(scenarioCode) {
   return svc;
 }
 
-class MemLock {
-  constructor() { this.locks = new Map(); }
-  async acquire(key) {
-    if (this.locks.has(key)) return null;
-    this.locks.set(key, true);
-    return { release: async () => this.locks.delete(key) };
-  }
-}
-
-const memLock = new MemLock();
-
-async function withLock(scope, fn, { logger }) {
-  const lockSvc = infra?.getLockService ? infra.getLockService() : memLock;
-  const lock = await lockSvc.acquire(scope);
-  if (!lock) {
-    const err = new Error('Could not acquire lock');
-    err.code = 'LOCK_BUSY';
-    throw err;
-  }
-  try { return await fn(); }
-  finally { try { await lock.release(); } catch (e) { logger?.warn?.('lock release failed', e?.message); } }
-}
-
 async function withDbRetry(fn, { label, log: logger } = {}) {
   if (infra?.withDbRetry) return infra.withDbRetry(fn, { label, log: logger });
   return fn();
@@ -74,14 +48,22 @@ module.exports = function createScenarioHandler(scenarioCode) {
 
   return async function scenarioHandler(req) {
     const actor = req?.user?.id || req?.user?.attr?.user_name || scenario.systemUser;
-    const { companyCode = null, postingDate = null, documentDate = null,
-            baselineDate = null, dryRun = false } = req.data || {};
+    const {
+      companyCode = null,
+      postingDate = null,
+      documentDate = null,
+      baselineDate = null,
+      dryRun = false
+    } = req.data || {};
 
     const correlationId = req?.headers?.['x-correlation-id'] || uuid();
 
     const processor = () => withDbRetry(
       () => consolidationService.run(scenarioCode, {
-        companyCode, postingDate, documentDate, baselineDate,
+        companyCode,
+        postingDate,
+        documentDate,
+        baselineDate,
         dryRun: dryRun === true || dryRun === 'true',
         requestedBy: actor
       }),
@@ -89,11 +71,7 @@ module.exports = function createScenarioHandler(scenarioCode) {
     );
 
     try {
-      const result = await withLock(
-        `${LOCK_SCOPE_CONSOLIDATION}:${scenarioCode}`,
-        processor,
-        { logger: log }
-      );
+      const result = await processor();
 
       return {
         scenario: result.scenario,
@@ -111,10 +89,6 @@ module.exports = function createScenarioHandler(scenarioCode) {
         message: result.message || ''
       };
     } catch (err) {
-      if (/Could not acquire lock|LOCK_BUSY/i.test(err.message)) {
-        req.reject(409, `${scenario.displayName || scenarioCode} consolidation is already running on another instance.`);
-        return;
-      }
       if (log.error) log.error(`${scenarioCode} run failed: ${err.message}`, { correlationId });
       else console.error(`[${scenarioCode}] run failed: ${err.message}`);
       req.error(500, err.message);

@@ -74,10 +74,14 @@ const STATUS = Object.freeze({
   '062': 'POSTING_FAILED',
   // Master data lookup (unified, requirement change)
   '063': 'NO_MASTER_DATA_FOUND',
+  // NEW: txn_paid_date consistency (2026-08-18)
+  '064': 'INVALID_TXN_PAID_DATE',
+  '065': 'INVALID_BALANCE_CHECK',
   '100': 'UNKNOWN_ERROR'
 });
 
 const FRIENDLY = Object.freeze({
+
   invalidFileName: (fileName, expected) =>
     `File name does not match the expected pattern. Received: "${fileName}". Expected format: ${expected}. Please rename the file to the correct pattern and re-upload.`,
   missingColumn: (missing) =>
@@ -137,7 +141,24 @@ const FRIENDLY = Object.freeze({
   fileDownloadFailed: (remotePath, reason) =>
     `Failed to download file "${remotePath}". Reason: ${reason}.`,
   sftpConnection: (reason) =>
-    `SFTP connection failed: ${reason}. Please verify destination configuration.`
+    `SFTP connection failed: ${reason}. Please verify destination configuration.`,
+  // NEW: txn_paid_date consistency
+  invalidPaidDate: (distinctValues) => {
+    const display = (distinctValues || []).map((v) => v ? `"${v}"` : '"(empty)"').join(', ');
+    return `Inconsistent txn_paid_date values found: [${display}]. All rows in the file must have the same txn_paid_date. Please correct the file so that txn_paid_date is consistent and re-upload.`;
+  },
+  // invalidBalanceCheck: (distinctValues) => {
+  //   const display = (distinctValues || []).map((v) => {
+  //     const s = String(v ?? '').trim();
+  //     return s ? `"${s}"` : '"(empty)"';
+  //   }).join(', ');
+  //   return `Invalid balance_check value(s) found: [${display}]. Every row must have balance_check equal to 0 (for example 0 or 0.00). Blank, missing, or any non-zero value rejects the entire file. Please set balance_check to 0 on all rows and re-upload.`;
+  // }
+    invalidBalanceCheck: (value) => {
+    const s = String(value ?? '').trim();
+    const display = s ? `"${s}"` : '"(empty)"';
+    return `Invalid balance_check ${display}. This row must have balance_check equal to 0 (for example 0 or 0.00).`;
+  }
 });
 
 function toText(code) {

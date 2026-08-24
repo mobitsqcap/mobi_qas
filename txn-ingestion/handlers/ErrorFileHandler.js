@@ -113,7 +113,8 @@ class ErrorFileHandler {
       transaction_currency: record?.TXN_CURRENCY,
       settled_in_currency: record?.SETTLED_IN_CURRENCY,
       time_zone: record?.TIME_ZONE,
-      conversion_rate: record?.CONVERSION_RATE
+      conversion_rate: record?.CONVERSION_RATE,
+      balance_check: record?.BALANCE_CHECK
     };
 
     return Object.fromEntries(
@@ -149,6 +150,8 @@ class ErrorFileHandler {
       rows = [...(invalidRows || [])];
     }
 
+    const failedCount = rows.length;
+
     const lines = [
       `FILE NAME       : ${fileName}`,
       `AUDIT ID        : ${auditId}`
@@ -165,13 +168,13 @@ class ErrorFileHandler {
 
     if (options.fileLevelFailure) {
       lines.push(
-        'This file contains the failed record details in a human-readable format.',
+        `This file contains the transaction records that failed validation. No records were inserted as ${failedCount} record(s) failed validation.`,
         '',
         'If a field is not available at the time of failure, it is left blank.'
       );
     } else {
       lines.push(
-        'This file contains the transaction records that failed validation.',
+        `This file contains the transaction records that failed validation. No records were inserted as ${failedCount} record(s) failed validation.`,
         '',
         'Only invalid records are listed below in a human-readable format.'
       );

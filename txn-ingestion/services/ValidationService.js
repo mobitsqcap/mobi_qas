@@ -63,7 +63,7 @@ class ValidationService {
   createContext() {
     return {
       mobiReferencesSeen: new Set(),
-      hostReferencesSeen: new Set(),
+      // hostReferencesSeen REMOVED - HOST_REFERENCE_ID has no validation
       masterIndex: null
     };
   }
@@ -80,21 +80,11 @@ class ValidationService {
       context.mobiReferencesSeen.add(mobiReference);
     }
 
-    const hostReference = String(record.HOST_REFERENCE_ID || '').trim();
-    if (!hostReference) return;
-
-    const days = [record.TXN_CREATED_DATE, record.TXN_PAID_DATE].filter(Boolean);
-    for (const day of days) {
-      const hostDay = key(hostReference, String(day).slice(0, 10));
-      if (context.hostReferencesSeen.has(hostDay)) {
-        errors.push({
-          code: StatusCodeUtil.toCode('DUPLICATE_HOST_REFERENCE'),
-          message: StatusCodeUtil.FRIENDLY.duplicateHostRef(hostReference, String(day).slice(0, 10))
-        });
-        break;
-      }
-    }
-    days.forEach((day) => context.hostReferencesSeen.add(key(hostReference, String(day).slice(0, 10))));
+    // HOST_REFERENCE_ID: NO VALIDATION
+    // - duplicates within file are allowed
+    // - duplicates per day are allowed
+    // - empty values are allowed
+    // Previously checked DUPLICATE_HOST_REFERENCE here - removed
   }
 
   _buildMasterIndex(masters) {

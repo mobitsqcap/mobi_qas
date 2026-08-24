@@ -63,7 +63,7 @@ module.exports = Object.freeze({
     'host_fee_payable', 'mobi_mdr_amount', 'mdr_revenue', 'ar_payin', 'ap_payin',
     'ap_payout', 'host_reference_id', 'merchant_reference_id', 'transaction_status',
     'original_amount', 'transaction_currency', 'settled_in_currency', 'time_zone',
-    'conversion_rate'
+    'conversion_rate', 'balance_check'
   ])
 });
 

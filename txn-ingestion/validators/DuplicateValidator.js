@@ -8,22 +8,15 @@ class DuplicateValidator {
   }
 
   async prepare(records) {
+    // HOST_REFERENCE_ID: NO VALIDATION - skip DB lookup for host references
     const mobiReferences = records.map((record) => record.MOBI_REFERENCE_ID).filter(Boolean);
-    const hostReferences = records.map((record) => record.HOST_REFERENCE_ID).filter(Boolean);
 
-    const [existingMobi, existingHostRows] = await Promise.all([
-      this.transactionRepository.findExistingMobiReferenceIds(mobiReferences),
-      this.transactionRepository.findHostReferenceDates(hostReferences)
+    const [existingMobi] = await Promise.all([
+      this.transactionRepository.findExistingMobiReferenceIds(mobiReferences)
     ]);
 
-    const hostDays = new Set();
-    for (const row of existingHostRows) {
-      for (const date of [row.TXN_CREATED_DATE, row.TXN_PAID_DATE].filter(Boolean)) {
-        hostDays.add(this._hostDay(row.HOST_REFERENCE_ID, date));
-      }
-    }
-
-    return { existingMobi, hostDays };
+    // Return empty hostDays for backward compatibility, but it will not be used
+    return { existingMobi, hostDays: new Set() };
   }
 
   validate(record, prepared) {
@@ -36,15 +29,8 @@ class DuplicateValidator {
       });
     }
 
-    if (record.HOST_REFERENCE_ID) {
-      const days = [record.TXN_CREATED_DATE, record.TXN_PAID_DATE].filter(Boolean);
-      if (days.some((date) => prepared.hostDays.has(this._hostDay(record.HOST_REFERENCE_ID, date)))) {
-        errors.push({
-          code: StatusCodeUtil.toCode('HOST_REFERENCE_EXISTS'),
-          message: StatusCodeUtil.FRIENDLY.duplicateHostRefDb(record.HOST_REFERENCE_ID)
-        });
-      }
-    }
+    // HOST_REFERENCE_ID: NO VALIDATION - duplicate host reference allowed
+    // Previously checked HOST_REFERENCE_EXISTS / duplicate per day - removed
 
     return errors.length ? { valid: false, errors } : { valid: true, errors: [] };
   }

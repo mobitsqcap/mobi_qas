@@ -1,7 +1,17 @@
 using { mobi.db as db } from '../db/schema';
 
+// Interactive users authenticate through XSUAA; Job Scheduler and CPI use
+// client-credentials tokens and are represented by CAP as system-user.
+@requires: ['authenticated-user', 'system-user']
 service DomesticSettlementConsolidationService {
+
   @cds.persistence.skip
+  @restrict: [
+    { grant: 'READ',   to: 'Read' },
+    { grant: 'READ',   to: 'OperationsTrigger' },
+    { grant: 'UPDATE', to: 'OperationsTrigger' },
+    { grant: 'READ',   to: 'PostingCallback' }
+  ]
   entity LineItems {
     key CONSOL_REF_ID          : String(50);
     key DOC_REF_ITEM           : Integer;
@@ -17,6 +27,9 @@ service DomesticSettlementConsolidationService {
         BASELINE_DATE          : Date;
         CURRENCY               : String(3);
         AP_PAYOUT              : Decimal(18,2);
+        TRANSACTION_AMOUNT     : Decimal(18,2);
+        HOST_MDR_AMOUNT        : Decimal(18,2);
+        HOST_FEE_PAYABLE       : Decimal(18,2);
         GL_ACCOUNT             : String(10);
         DEBIT_CREDIT_INDICATOR : String(1);
         COST_CENTER            : String(10);
@@ -31,24 +44,27 @@ service DomesticSettlementConsolidationService {
         CREATED_TIMESTAMP      : Timestamp;
         CHANGED_BY             : String(50);
         CHANGED_TIMESTAMP      : Timestamp;
+        
   }
 
   type DomesticSettlementConsolidationRunResult {
-    scenario            : String(40);
-    dryRun              : Boolean;
-    inputTransactions   : Integer;
-    skippedTransactions : Integer;
-    glAccountMissing    : Integer;
-    bpMasterMissing     : Integer;
-    errorRecordsUpdated : Integer;
-    headersCreated      : Integer;
-    lineItemsCreated    : Integer;
-    transactionsUpdated : Integer;
-    consolRefIds        : String(5000);
+    scenario               : String(40);
+    dryRun                 : Boolean;
+    inputTransactions      : Integer;
+    skippedTransactions    : Integer;
+    glAccountMissing       : Integer;
+    bpMasterMissing        : Integer;
+    errorRecordsUpdated    : Integer;
+    headersCreated         : Integer;
+    lineItemsCreated       : Integer;
+    transactionsUpdated    : Integer;
+    consolRefIds           : String(5000);
     consolidationErrorFile : String(200);
-    message             : String(500);
+    message                : String(500);
   }
 
+  // Human operators use OperationsTrigger; scheduled executions use Jobs.
+  @requires: ['OperationsTrigger', 'Jobs']
   action runDomesticSettlementConsolidation(
     companyCode  : String(4),
     postingDate  : Date,
@@ -57,22 +73,19 @@ service DomesticSettlementConsolidationService {
     dryRun       : Boolean
   ) returns DomesticSettlementConsolidationRunResult;
 
-  // CPI posting-result callback (new schema: statusCode-driven).
-  //   statusCode 061 = POSTED   (requires sapRefDocument)
-  //   statusCode 062 = POSTING_FAILED (errorDetail -> AUDIT.STATUS_MESSAGE)
-  //   statusCode 060 = POSTING_PENDING
+  @requires: 'PostingCallback'
   action updateBatchPostingResults(items : array of {
-      consolRefId    : String(50);
-      sapRefDocument : String(20);
-      statusCode     : String(3);
-      httpStatus     : Integer;
-      errorDetail    : String(255);
+    consolRefId    : String(50);
+    sapRefDocument : String(20);
+    statusCode     : String(3);
+    httpStatus     : Integer;
+    errorDetail    : String(255);
   }) returns array of {
-      consolRefId    : String(50);
-      sapRefDocument : String(20);
-      statusCode     : String(3);
-      httpStatus     : Integer;
-      errorDetail    : String(500);
-      message        : String(500);
+    consolRefId    : String(50);
+    sapRefDocument : String(20);
+    statusCode     : String(3);
+    httpStatus     : Integer;
+    errorDetail    : String(500);
+    message        : String(500);
   };
 }

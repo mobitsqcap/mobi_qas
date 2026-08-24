@@ -43,112 +43,76 @@ console.log("GL Entity:", valuelookup);
 
             console.time("HANA Insert Time");
 
-            const { valuelookup } = cds.entities("VlGlAccounts");
+ const { valuelookup } = cds.entities("VlGlAccounts");
 
-            // const result = await cds.db.run(
-            //     INSERT.into(valuelookup).entries(data),
-            //     req
-            // );
-            const duplicateGLs = [];
-            const invalidHosts = [];
+const duplicateRecords = [];
+const invalidHosts = [];
 
-            // for (const row of data) {
+for (const row of data) {
 
-            //     const existing = await SELECT.one
-            //         .from(valuelookup)
-            //         .where({
-            //             GL_Accounts: row.GL_Accounts
-            //         });
-
-            //     if (existing) {
-            //         duplicateGLs.push(row.GL_Accounts);
-            //     }
-            // }
-
-            for (const row of data) {
-
-    // Duplicate GL validation
     const existing = await SELECT.one
         .from(valuelookup)
         .where({
-            GL_Accounts: row.GL_Accounts
+            COMPANY_CODE: row.COMPANY_CODE,
+            PAYMENT_TYPE: row.PAYMENT_TYPE,
+            PAYMENT_SUB_TYPE: row.PAYMENT_SUB_TYPE,
+            HOST_NAME: row.HOST_NAME,
+            TXN_AMOUNT: row.TXN_AMOUNT,
+            HOST_MDR_AMOUNT: row.HOST_MDR_AMOUNT,
+            HOST_FEE_PAYABLE: row.HOST_FEE_PAYABLE,
+            MOBI_MDR_AMOUNT: row.MOBI_MDR_AMOUNT,
+            MDR_REVENUE: row.MDR_REVENUE,
+            GL_Accounts: row.GL_Accounts,
+            Status: "A"
         });
 
     if (existing) {
-        duplicateGLs.push(row.GL_Accounts);
+
+        duplicateRecords.push({
+            COMPANY_CODE: row.COMPANY_CODE,
+            PAYMENT_TYPE: row.PAYMENT_TYPE,
+            PAYMENT_SUB_TYPE: row.PAYMENT_SUB_TYPE,
+            HOST_NAME: row.HOST_NAME,
+            TXN_AMOUNT: row.TXN_AMOUNT,
+            HOST_MDR_AMOUNT: row.HOST_MDR_AMOUNT,
+            HOST_FEE_PAYABLE: row.HOST_FEE_PAYABLE,
+            MOBI_MDR_AMOUNT: row.MOBI_MDR_AMOUNT,
+            MDR_REVENUE: row.MDR_REVENUE,
+            GL_Accounts: row.GL_Accounts
+        });
+
     }
 
     // HOST validation
-   const host = row.HOST_NAME.trim().toUpperCase();
+    const host = row.HOST_NAME.trim().toUpperCase();
 
-const hostExists = await SELECT.one
-    .from(MOBI_DB_MASTER)
-    .where`UPPER(ID) = ${host}`;
+    const hostExists = await SELECT.one
+        .from(MOBI_DB_MASTER)
+        .where`UPPER(ID) = ${host}`;
 
     if (!hostExists) {
         invalidHosts.push(row.HOST_NAME);
     }
 }
 
-            // if (duplicateGLs.length > 0) {
 
-            //     req.error({
-            //         code: 400,
-            //         message: "Duplicate GL Account(s) found: " +
-            //             [...new Set(duplicateGLs)].join(", ")
-            //     });
-
-            //     return;
-            // }
-            if (duplicateGLs.length > 0) {
-
-    const uniqueDuplicateGLs = [...new Set(duplicateGLs)];
+// Duplicate records found
+if (duplicateRecords.length > 0) {
 
     req.error({
         code: 400,
-        message: "Duplicate GL Account(s) found: " +
-            uniqueDuplicateGLs.join(", "),
+        message: "Duplicate records found.",
         target: JSON.stringify({
             totalRecords: data.length,
-            validRecords: data.length - uniqueDuplicateGLs.length,
-            duplicateRecords: uniqueDuplicateGLs.length
+            validRecords: data.length - duplicateRecords.length,
+            duplicateRecords: duplicateRecords.length,
+            duplicateData: duplicateRecords
         })
     });
 
     return;
 }
-// if (invalidHosts.length > 0) {
 
-//     const uniqueInvalidHosts = [...new Set(invalidHosts)];
-
-//     req.error({
-//         code: 400,
-//         message: "Invalid Host(s): " + uniqueInvalidHosts.join(", "),
-//         // target: JSON.stringify({
-//         //     totalRecords: data.length,
-//         //     validRecords: data.length - uniqueInvalidHosts.length,
-//         //     invalidHosts: uniqueInvalidHosts.length
-//         // })
-//         target: JSON.stringify({
-//     totalRecords: data.length,
-//     validRecords: data.length - uniqueInvalidHosts.length,
-//     duplicateRecords: 0,
-//     invalidHosts: uniqueInvalidHosts.length
-// })
-//     });
-// req.error({
-//     code: 400,
-//     message: "Invalid Host(s): " + uniqueInvalidHosts.join(", "),
-//     target: JSON.stringify({
-//         totalRecords: data.length,
-//         validRecords: data.length - uniqueInvalidHosts.length,
-//         duplicateRecords: 0,
-//         invalidHosts: uniqueInvalidHosts.length,
-//         invalidHostList: uniqueInvalidHosts
-//     })
-// });
-//     return;
-// }
 if (invalidHosts.length > 0) {
 
     const uniqueInvalidHosts = [...new Set(invalidHosts)];

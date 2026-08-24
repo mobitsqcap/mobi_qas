@@ -125,12 +125,12 @@ module.exports = Object.freeze({
   /**
    * The canonical set of TRANSACTION.STATUS_CODE values that mean "pick this
    * row up for consolidation". Includes 041/053 (ready) plus all retryable
-   * error codes (055/056/057/058/059/062).
+   * error codes (055/056/057/058/059).
    */
   PENDING_CONSOL_STATUSES: Object.freeze([
     SC_041, SC_053,
     SC_056, SC_057, SC_058, SC_059,
-    SC_055, SC_062
+    SC_055
   ]),
 
   AUDIT: {

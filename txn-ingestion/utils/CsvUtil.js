@@ -43,7 +43,8 @@ class CsvUtil {
 
     if (!matrix.length) return { headers: [], rows: [], totalRows: 0 };
 
-    const headers = matrix[0].map((header) => header.trim());
+    // const headers = matrix[0].map((header) => header.trim());
+        const headers = matrix[0].map((header) => header.trim().toLowerCase());
     const rows = matrix.slice(1).map((values) => {
       const record = {};
       headers.forEach((header, index) => {

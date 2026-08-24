@@ -20,7 +20,7 @@ class BaseScenarioBuilder {
   getCompanyCode(record) { return NormalizeUtil.text(record.COMPANY_CODE); }
   getPortalCode(record) { return NormalizeUtil.text(record.MOBI_PORTAL_CODE); }
 
-  getPostingDate(record, options = {}) { return DateUtil.dbDate(options.postingDate || record.TXN_CREATED_DATE); }
+  getPostingDate(record, options = {}) { return DateUtil.dbDate(options.postingDate || record.TXN_PAID_DATE); }
   getDocumentDate(record, options = {}) { return DateUtil.dbDate(options.documentDate || this.getPostingDate(record, options)); }
   getBaselineDate(record, options = {}) { return DateUtil.dbDate(options.baselineDate || this.getPostingDate(record, options)); }
 
@@ -164,4 +164,3 @@ class BaseScenarioBuilder {
 }
 
 module.exports = BaseScenarioBuilder;
-

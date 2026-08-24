@@ -84,6 +84,7 @@ entity MOBI_DB_TRANSACTION {
       HOST_REFERENCE_ID     : String(100);
       MERCHANT_REFERENCE_ID : String(100);
       TXN_STATUS            : String(15);
+      BALANCE_CHECK         : Decimal(8, 5);
       ORIGINAL_AMOUNT       : Decimal(18, 2);
       SETTLED_IN_CURRENCY   : String(3);
       CONVERSION_RATE       : Decimal(20, 8);

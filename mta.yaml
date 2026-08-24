@@ -167,7 +167,7 @@ resources:
   - name: mobi_job_scheduler
     type: org.cloudfoundry.existing-service
     parameters:
-      service-name: mobi_job_dev
+      service-name: mobi_job_qas
 
   - name: sftp-mobi-destination
     type: org.cloudfoundry.existing-service
