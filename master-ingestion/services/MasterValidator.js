@@ -7,8 +7,8 @@ class MasterValidator {
     const validRecords = [];
     const errorRows = [];
 
-    // Within-batch duplicate detection (case-insensitive)
-    const batchIdNormalised = new Map(); // normalisedId -> true
+  
+    const batchIdNormalised = new Map();
 
     for (const record of records) {
       const id = (record.ID || '').toString();
@@ -19,7 +19,7 @@ class MasterValidator {
 
       const recordErrors = [];
 
-      // Within-batch duplicates
+     
       if (batchIdNormalised.has(normId)) {
         recordErrors.push({
           code: Constants.ERROR_CODES.DUPLICATE_ID_IN_BATCH,
@@ -29,7 +29,6 @@ class MasterValidator {
         batchIdNormalised.set(normId, true);
       }
 
-      // Case-insensitive conflict with existing master data (same portal+company)
       if (existingIdKeys.has(composite)) {
         recordErrors.push({
           code: Constants.ERROR_CODES.DUPLICATE_BP_IN_DATABASE,
@@ -37,7 +36,6 @@ class MasterValidator {
         });
       }
 
-      // Run per-field validation (collects all errors)
       recordErrors.push(...this._validateOne(record));
 
       if (recordErrors.length > 0) {
@@ -67,7 +65,7 @@ class MasterValidator {
     const limits = Constants.FIELD_LIMITS;
     const mandatory = Constants.MANDATORY_FIELDS;
 
-    // 1) Mandatory field checks
+   
     for (const field of mandatory) {
       const value = record[field];
       if (value === undefined || value === null ||
@@ -79,7 +77,6 @@ class MasterValidator {
       }
     }
 
-    // 2) Field length checks
     this._checkLength(errors, 'ID', record._rawId, limits.ID);
     this._checkLength(errors, 'MOBI_PORTAL_CODE', record.MOBI_PORTAL_CODE_RAW, limits.MOBI_PORTAL_CODE);
     this._checkLength(errors, 'SAP_COMPANY_CODE', record.SAP_COMPANY_CODE_RAW, limits.SAP_COMPANY_CODE);
@@ -93,7 +90,7 @@ class MasterValidator {
     this._checkLength(errors, 'EXTERNAL_BP_NUMBER', record.EXTERNAL_BP_NUMBER_RAW, limits.EXTERNAL_BP_NUMBER);
     this._checkLength(errors, 'BP_NUMBER', record.BP_NUMBER_RAW, limits.BP_NUMBER);
 
-    // 3) TYPE validation
+  
     const typeRaw = (record.TYPE_RAW || record.TYPE || '').toString().trim();
     if (typeRaw) {
       const lower = typeRaw.toLowerCase();
@@ -108,7 +105,7 @@ class MasterValidator {
       }
     }
 
-    // 4) MOBI_PORTAL_CODE validation
+    
     const portalCodeRaw = (record.MOBI_PORTAL_CODE_RAW || record.MOBI_PORTAL_CODE || '').toString().trim();
     if (portalCodeRaw) {
       const upper = portalCodeRaw.toUpperCase();
@@ -122,7 +119,7 @@ class MasterValidator {
       }
     }
 
-    // 5) SAP_COMPANY_CODE validation
+   
     const companyCodeRaw = (record.SAP_COMPANY_CODE_RAW || record.SAP_COMPANY_CODE || '').toString().trim();
     if (companyCodeRaw) {
       if (!/^\d+$/.test(companyCodeRaw)) {
@@ -140,7 +137,7 @@ class MasterValidator {
       }
     }
 
-    // 6) COUNTRY_CODE validation
+  
     const countryCodeRaw = (record.COUNTRY_CODE_RAW || record.COUNTRY_CODE || '').toString().trim();
     if (countryCodeRaw) {
       const upper = countryCodeRaw.toUpperCase();
@@ -159,7 +156,7 @@ class MasterValidator {
       }
     }
 
-    // 7) BP_TAX_LONG_NUMBER / BUSINESS_REG_NO_TIN should not be in exponential notation
+
     const bpTaxLongNumber = (
       record.BUSINESS_REG_NO_TIN_RAW ||
       record.BP_TAX_LONG_NUMBER ||

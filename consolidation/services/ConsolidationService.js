@@ -44,9 +44,6 @@ class ConsolidationService {
     const BuilderClass = this._getBuilder(scenarioCode);
     const options = this._buildOptions(scenario, params);
 
-    // Reset the reference-number counters so this run starts from the current DB
-    // max (empty DB => 0001). Prevents a cached service from reusing/incrementing
-    // a stale counter from a previous run.
     this.referenceNumberService.resetCounters?.();
 
     const runId = IdUtil.runId(scenario.code);
@@ -85,10 +82,8 @@ class ConsolidationService {
         return emptyResult;
       }
 
-      // ---- GL account validation ----
       const glLookup = await this.glAccountRepository.loadLookup(records);
-      const glIssues = new Map(); // txnKey -> { statusCode, detail }
-
+      const glIssues = new Map();
       for (const r of records) {
         const missing = glLookup.findMissingFields(r, scenario);
         if (missing.missing.length || missing.conflicts.length) {
@@ -100,7 +95,7 @@ class ConsolidationService {
         }
       }
 
-      // ---- Master BP validation (on the GL-valid subset for efficiency) ----
+    
       const glValidRecords = records.filter((r) => !glIssues.has(this.transactionKey(r)));
       const masterRows = await this.masterRepository.findActiveByLegacyIds(
         this._legacyIdsForBusinessPartnerLookup(scenario, glValidRecords)
@@ -121,8 +116,7 @@ class ConsolidationService {
         }
       }
 
-      // ---- Merge GL + BP issues per record; mark TX + write audit ----
-      const errorRecords = []; // { record, statusCode, message }
+      const errorRecords = []; 
       const missingKeySet = new Set();
       let errorRecordsUpdated = 0;
 
@@ -140,7 +134,7 @@ class ConsolidationService {
         if (gl) { parts.push(gl.detail); statusCode = statusCode || gl.statusCode; }
         if (bp) { parts.push(bp.detail); statusCode = statusCode || bp.statusCode; }
 
-        // If both GL and BP, prefer the BP-specific code (057/058) over generic GL (056).
+      
         if (gl && bp) statusCode = bp.statusCode;
 
         errorRecords.push({ record: r, statusCode, message: parts.join('; ') });
@@ -148,7 +142,6 @@ class ConsolidationService {
 
       let consolidationErrorFile = null;
 
-      // Records that passed both validations go on to be built.
       const recordsToConsolidate = records.filter((r) => !missingKeySet.has(this.transactionKey(r)));
 
       const context = {
@@ -217,9 +210,6 @@ class ConsolidationService {
         }
       }
 
-      // Point 5: unbalanced documents (debit != credit) are not consolidated.
-      // Mark their source transactions with 055 CONSOLIDATION_FAILED and surface
-      // them through the same error flow as GL/BP (audit + consolidation error file).
       const imbalanceCode = Constants.ERROR_TO_STATUS_CODE[Constants.ERROR_CODES.CONSOLIDATION_BUILD_FAILED];
       for (const doc of unbalancedDocuments) {
         const detail = builder.imbalanceDetail(doc);
@@ -231,7 +221,7 @@ class ConsolidationService {
         }
       }
 
-      // Process all recoverable errors (GL/BP + imbalance): mark TX + audit + error file.
+    
       if (errorRecords.length && !options.dryRun) {
         const byCode = new Map();
         const detailByTxn = new Map();
@@ -279,11 +269,7 @@ class ConsolidationService {
         });
       }
 
-      // All-or-nothing: if ANY record has a missing GL/BP (or an unbalanced
-      // document), do NOT insert any documents. This stops CPI from posting a
-      // partial journal entry now and a second one later once the missing GL/BP
-      // is configured. The valid records simply stay pending and are retried
-      // on the next run.
+   
       if (documents.length && !errorRecords.length) {
         await this.consolidationRepository.insertDocuments(documents, runAudit?.AUDIT_ID || null);
         let transactionsUpdated = 0;
@@ -297,8 +283,6 @@ class ConsolidationService {
         });
       }
 
-      // Clean run: overwrite any previous consolidation error report with an
-      // "issues fixed" notice (no rename dependency).
       if (!errorRecords.length) {
         const consolidatedTxns = documents.reduce((t, d) => t + (d.sourceTransactions?.length || 0), 0);
         const resolved = await this._resolveConsolidationErrorReport({

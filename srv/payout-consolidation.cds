@@ -1,7 +1,5 @@
 using { mobi.db as db } from '../db/schema';
 
-// Interactive users authenticate through XSUAA; Job Scheduler and CPI use
-// client-credentials tokens and are represented by CAP as system-user.
 @requires: ['authenticated-user', 'system-user']
 service PayoutConsolidationService {
 
@@ -65,7 +63,6 @@ service PayoutConsolidationService {
     message                : String(500);
   }
 
-  // Human operators use OperationsTrigger; scheduled executions use Jobs.
   @requires: ['OperationsTrigger', 'Jobs']
   action runPayoutConsolidation(
     companyCode  : String(4),

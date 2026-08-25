@@ -7,12 +7,11 @@ const TransactionRepository = require('../repositories/TransactionRepository');
 const AuditRepository = require('../repositories/AuditRepository');
 const Constants = require('../constants/ConsolidationConstants');
 
-const SC_POSTING_PENDING = Constants.POSTING_STATUS.POSTING_PENDING; // 060
-const SC_POSTED = Constants.POSTING_STATUS.POSTED;                   // 061
-const SC_POSTING_FAILED = Constants.POSTING_STATUS.POSTING_FAILED;   // 062
+const SC_POSTING_PENDING = Constants.POSTING_STATUS.POSTING_PENDING; 
+const SC_POSTED = Constants.POSTING_STATUS.POSTED;                  
+const SC_POSTING_FAILED = Constants.POSTING_STATUS.POSTING_FAILED;  
 const VALID_STATUS_CODES = new Set([SC_POSTING_PENDING, SC_POSTED, SC_POSTING_FAILED]);
 
-// Backward-compatible alias: postingStatus text / legacy 2-digit -> 3-digit code.
 function resolveStatusCode(item) {
   const direct = String(item.statusCode || item.STATUS_CODE || '').trim();
   if (direct) return direct;

@@ -8,29 +8,16 @@ const DateUtil = require('../utils/DateUtil');
 
 const ENTITY = 'mobi.db.MOBI_DB_AUDIT';
 const WRITE_CHUNK_SIZE = 500;
-
-/**
- * Per-row audit entries are written ONCE — at the end of the run — with their
- * final insert/validation result. There is no intermediate "processing" write
- * (which previously confused the two-step processing-vs-insert view). Each
- * per-row message follows the format:
- *   "Row N | Mobi Ref ID: <value> | <message>"
- *
- * MOBI_DB_AUDIT key is (AUDIT_ID, AUDIT_LINE_ITEM). AUDIT_LINE_ITEM is a
- * sequential integer (1, 2, 3…) within one AUDIT_ID run.
- */
 class AuditRepository {
   constructor() {
     this.lineItemCounters = new Map();
   }
-
   _nextAuditLineItem(auditId) {
     const key = String(auditId);
     const next = (this.lineItemCounters.get(key) || 0) + 1;
     this.lineItemCounters.set(key, next);
     return next;
   }
-
   async start({ auditId, runId, fileName, createdBy }) {
     const db = await cds.connect.to('db');
     const now = DateUtil.nowTimestamp();
@@ -64,11 +51,6 @@ class AuditRepository {
     }).where({ AUDIT_ID: auditId, AUDIT_LINE_ITEM: 1 }));
   }
 
-  /**
-   * Reserve an AUDIT_LINE_ITEM for every record and clear any stale per-row
-   * rows, but do NOT write per-row rows yet. They are written once, at the end,
-   * by finalizeRows() with the final result.
-   */
   async initializeRows(auditId, fileName, records) {
     const db = await cds.connect.to('db');
 
@@ -81,10 +63,6 @@ class AuditRepository {
     });
   }
 
-  /**
-   * Write each per-row entry ONCE, with its final result. Clears any stale
-   * per-row rows first (defensive), then INSERTs the final rows.
-   */
   async finalizeRows(auditId, fileName, records, options = {}) {
     const db = await cds.connect.to('db');
     const now = DateUtil.nowTimestamp();
@@ -92,7 +70,6 @@ class AuditRepository {
     const invalidCount = (records || []).filter((r) => r.ROW_STATUS === 'INVALID').length;
     const validCount = (records || []).length - invalidCount;
 
-    // FILE summary (AUDIT_LINE_ITEM = 1) — include the file name
     const summaryMessageType = options.fileRejected ? 'W' : 'S';
     const summaryMessage = options.fileRejected
       ? `File ${fileName} rejected. total=${records.length}, errors=${invalidCount}, valid_not_inserted=${validCount}.`
@@ -103,7 +80,6 @@ class AuditRepository {
       STATUS_MESSAGE: summaryMessage.slice(0, 500)
     }).where({ AUDIT_ID: auditId, AUDIT_LINE_ITEM: 1 }));
 
-    // Per-row rows are written only here, once, with the final result.
     await db.run(DELETE.from(ENTITY).where({ AUDIT_ID: auditId, AUDIT_LINE_ITEM: { '>': 1 } }));
 
     const entries = [];
@@ -147,13 +123,11 @@ class AuditRepository {
     const detail = String(error?.message || 'File failed');
     const sourceRows = rawRows || [];
 
-    // FILE summary — include the file name
     await db.run(UPDATE(ENTITY).set({
       MESSAGE_TYPE: 'E',
       STATUS_MESSAGE: `File ${fileName} failed. rows=${sourceRows.length}, detail=${detail}`.slice(0, 500)
     }).where({ AUDIT_ID: auditId, AUDIT_LINE_ITEM: 1 }));
 
-    // Create per-row error rows (new AUDIT_LINE_ITEM values, no conflict)
     const entries = sourceRows.map((raw, index) => {
       const lineItemNo = this._nextAuditLineItem(auditId);
       const rowNumber = raw?._ROW_NUMBER || index + 2;
@@ -196,18 +170,11 @@ class AuditRepository {
     return `${status}; total=${Number(stats.totalRows || 0)}, valid=${Number(stats.validCount || 0)}, errors=${Number(stats.errorCount || 0)}`.slice(0, 500);
   }
 
-  /** Resolve the Mobi reference id from a validated record or a raw CSV row. */
   _mobiRef(record) {
     const raw = record?._RAW_ROW || {};
     const value = record?.MOBI_REFERENCE_ID ?? raw.mobi_reference_id ?? raw.MOBI_REFERENCE_ID ?? '';
     return String(value).replace(/[\r\n|]+/g, ' ').trim();
   }
-
-  /**
-   * Canonical per-row message: "Row N | Mobi Ref ID: <value> | <message>".
-   * Newlines are stripped (pipes are preserved so "CODE: msg || CODE: msg"
-   * error detail separators survive).
-   */
   _rowMessage(record, messageText, options = {}) {
     const rowNumber = options.rowNumber ?? record?._ROW_NUMBER ?? '';
     const ref = this._mobiRef(record);

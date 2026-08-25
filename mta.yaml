@@ -66,14 +66,12 @@ modules:
     build-parameters:
       build-result: resources
       requires:
+        - name: glvlookup
         - artifacts:
             - glvlookup.zip
           name: glvlookup
           target-path: resources/
-        - artifacts:
-            - displayglvlookup.zip
-          name: displayglvlookup
-          target-path: resources/
+
         - artifacts:
             - masterbpupload.zip
           name: masterbpupload
@@ -82,17 +80,6 @@ modules:
   - name: glvlookup
     type: html5
     path: app/gl_vlookup
-    build-parameters:
-      build-result: dist
-      builder: custom
-      commands:
-        - npm install
-        - npm run build:cf
-      supported-platforms: []
-
-  - name: displayglvlookup
-    type: html5
-    path: app/display_glvlookup
     build-parameters:
       build-result: dist
       builder: custom
@@ -152,15 +139,34 @@ resources:
       service-plan: lite
       service-name: mobi-cap-destination-${space}
       config:
-        HTML5Runtime_enabled: false
+        HTML5Runtime_enabled: true
         init_data:
           instance:
             destinations:
+
               - Authentication: NoAuthentication
                 Name: ui5
                 ProxyType: Internet
                 Type: HTTP
                 URL: https://sap.com
+
+              - Name: glvlookup-html5
+                Type: HTTP
+                ProxyType: Internet
+                URL: https://ui5.sap.com
+                Authentication: NoAuthentication
+                HTML5.ForwardAuthToken: true
+                sap.cloud.service: fiori.service
+                html5-apps-repo.app_host_id: 2a04945e-679a-4d72-8548-206712a65de5
+
+              - Name: masterbpupload-html5
+                Type: HTTP
+                ProxyType: Internet
+                URL: https://ui5.sap.com
+                Authentication: NoAuthentication
+                HTML5.ForwardAuthToken: true
+                html5-apps-repo.app_host_id: 2a04945e-679a-4d72-8548-206712a65de5
+
             existing_destinations_policy: update
         version: 1.0.0
 
@@ -168,6 +174,7 @@ resources:
     type: org.cloudfoundry.existing-service
     parameters:
       service-name: mobi_job_qas
+      
 
   - name: sftp-mobi-destination
     type: org.cloudfoundry.existing-service

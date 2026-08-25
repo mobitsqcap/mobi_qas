@@ -92,14 +92,10 @@ module.exports = Object.freeze({
   allowedCompanyCodes: ['2000'],
   retryableConsolStatuses: RETRYABLE_STATUSES,
 
-  // New logic creates one document per company / portal / posting date / currency.
   groupMode: Constants.GROUP_MODE.DAILY,
 
-  // To match sample CONSOL_REF_ID: 2000PAYOUTDS202606290001
   refToken: 'DOMESTICSETTLEMENT',
 
-  // To match sample SAP_REF_DOCUMENT: 10000001
-  // Remove this if SAP reference document should remain blank until CPI/SAP returns it.
   sapReferencePrefix: '1',
 
   documentType: 'Z5',
@@ -115,25 +111,15 @@ module.exports = Object.freeze({
 
   requireMerchantBusinessPartner: true,
 
-  // Now required because host lines contain SAP_CUSTOMER_NUMBER.
   requireHostCustomerNumber: true,
 
-  // Settlement amount used for merchant payout lines and clearing debit.
-  // CHANGED: merchant lines now source their amount STRICTLY from TXN_AMOUNT
-  // (no AP_PAYOUT fallback). Item change: AP_PAYOUT -> TXN_AMOUNT.
   amountField: 'TXN_AMOUNT',
 
-  // Internal amount field used for the clearing debit line.
-  // CHANGED: AP_PAYOUT carries the debit (S) "total" line per requirement.
   clearingAmountField: 'AP_PAYOUT',
   clearingGlFlagField: 'TXN_AMOUNT',
 
-  // Amount field used for the merchant credit line.
-  // CHANGED: TRANSACTION_AMOUNT carries the credit (H) "merchant supplier"
-  // line per requirement.
   merchantAmountField: 'TRANSACTION_AMOUNT',
 
-  // New line order to match your sample.
   domesticLineBlockOrder: [
     'CLEARING_DEBIT',
     'HOST_COST_DEBIT',
@@ -143,17 +129,14 @@ module.exports = Object.freeze({
 
   requiredGlAccountFields: [
     {
-      // Clearing debit GL, example: 17001000
       glFlagField: 'TXN_AMOUNT',
       amountField: 'TXN_AMOUNT'
     },
     {
-      // Host MDR debit GL, example: 41001400
       glFlagField: 'HOST_MDR_AMOUNT',
       amountField: 'HOST_MDR_AMOUNT'
     },
     {
-      // Host fee payable credit GL, example: 15002200
       glFlagField: 'HOST_FEE_PAYABLE',
       amountField: 'HOST_FEE_PAYABLE',
       fallbackAmountField: 'HOST_MDR_AMOUNT'

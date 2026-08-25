@@ -98,9 +98,6 @@ function createLineItemsReadHandler(scenarioCode) {
   };
 }
 
-// -----------------------------------------------------------------------------
-// Column handling
-// -----------------------------------------------------------------------------
 
 function buildColumns(requestedColumns, allowedFields) {
   if (isCountColumns(requestedColumns)) return requestedColumns;
@@ -127,9 +124,6 @@ function toBaseColumn(columnOrField) {
   return typeof columnOrField === 'string' ? { ref: [field] } : columnOrField;
 }
 
-// -----------------------------------------------------------------------------
-// Expression / WHERE helpers
-// -----------------------------------------------------------------------------
 
 function transformExpression(value) {
   if (!value) return value;

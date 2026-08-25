@@ -1,25 +1,5 @@
 'use strict';
 
-/**
- * Consolidation constants.
- *
- * CONSOLIDATIONHEADER and CONSOLIDATIONLINEITEM use a single STATUS_CODE :
- * String(3) that holds the global 3-digit status code (from
- * StatusCodeUtil.STATUS). Error detail text is written to AUDIT.STATUS_MESSAGE.
- *
- * Key lifecycle codes for consolidation (all 3-digit, from MOBI_DB_STATUS):
- *   041 TRANSACTION_SUCCESS        – ALSO acts as "pending consolidation"
- *   053 CONSOLIDATION_PENDING      – document built, waiting for SAP
- *   060 POSTING_PENDING            – intermediate state (kept for compat)
- *   061 POSTED                     – SAP posting success
- *   062 POSTING_FAILED             – SAP posting failure (retryable)
- *   055 CONSOLIDATION_FAILED       – build/validation failure before posting
- *   056 GL_ACCOUNT_MISSING         – recoverable, transaction blocked
- *   057 MERCHANT_BP_MISSING        – recoverable, transaction blocked
- *   058 HOST_BP_MISSING            – recoverable, transaction blocked
- *   059 BP_MASTER_MISSING          – generic recoverable BP error
- */
-
 const StatusCodeUtil = require('../utils/StatusCodeUtil');
 
 const SC_041 = StatusCodeUtil.toCode('TRANSACTION_SUCCESS');
@@ -43,18 +23,10 @@ module.exports = Object.freeze({
     DEFAULT: 'SYSTEM_CONSOLIDATION'
   },
 
-  // -----------------------------------------------------------------
-  // SFTP location for consolidation error reports (Requirement #5).
-  // Consolidation GL/BP errors are written as
-  // Transactions_YYYYMMDD_Consolidation.csv into the shared ERROR folder.
-  // -----------------------------------------------------------------
   SFTP: {
     CONSOL_ERROR_PATH: 'Transaction_Data/ERROR'
   },
 
-  // -----------------------------------------------------------------
-  // HEADER / LINE_ITEM 3-digit STATUS_CODE values
-  // -----------------------------------------------------------------
   POSTING_STATUS: {
     CONSOLIDATION_PENDING: SC_053,
     POSTING_PENDING: SC_060,
@@ -121,12 +93,6 @@ module.exports = Object.freeze({
     CONSOLIDATION_FAILED: SC_055,
     POSTING_FAILED: SC_062
   },
-
-  /**
-   * The canonical set of TRANSACTION.STATUS_CODE values that mean "pick this
-   * row up for consolidation". Includes 041/053 (ready) plus all retryable
-   * error codes (055/056/057/058/059).
-   */
   PENDING_CONSOL_STATUSES: Object.freeze([
     SC_041, SC_053,
     SC_056, SC_057, SC_058, SC_059,

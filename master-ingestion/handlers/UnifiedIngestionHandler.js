@@ -77,7 +77,7 @@ class UnifiedIngestionHandler {
   }
 
   async _processInvalidFiles(files, executionContext, expectedType, logs) {
-    // Master flow ALWAYS records SYSTEM_SFTP as the creator, regardless of who triggered the run
+
     const actor = Constants.SYSTEM_USERS.SFTP || executionContext.actor || Constants.SYSTEM_USERS.DEFAULT;
     const runId = executionContext.runId || 'MANUAL_RUN';
 

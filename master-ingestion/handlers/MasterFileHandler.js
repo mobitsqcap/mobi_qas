@@ -85,7 +85,7 @@ class MasterFileHandler extends BaseFileHandler {
     if (is301) {
       const sampleId = records && records[0] ? records[0].ID : '';
       const dupError = new Error(F.duplicateBpInDb(sampleId || 'ID', '', ''));
-      dupError.code = '05'; // DUPLICATE_BP_IN_DATABASE
+      dupError.code = '05';
       dupError.rowNumber = records && records[0] ? records[0]._rowNumber : 1;
       dupError.mobiReferenceId = sampleId;
       throw dupError;

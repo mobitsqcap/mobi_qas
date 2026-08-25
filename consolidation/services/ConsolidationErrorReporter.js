@@ -7,11 +7,6 @@ const DateUtil = require('../utils/DateUtil');
 const NormalizeUtil = require('../utils/NormalizeUtil');
 const StatusCodeUtil = require('../utils/StatusCodeUtil');
 
-/**
- * Maps a scenario code to the suffix used in the error file name.
- * Each scenario gets its own file so Payin / Payout / Domestic Settlement
- * never overwrite each other.
- */
 function errorFileSuffix(scenarioCode) {
   if (scenarioCode === 'PAYIN') return 'Payins';
   if (scenarioCode === 'PAYOUT') return 'Payout';
@@ -82,7 +77,6 @@ class ConsolidationErrorReporter {
       'This file previously listed the blocked records; they have now been processed.'
     ].join('\n');
 
-    // Write the resolved content to a timestamped file, then remove the old one.
     await this.sftpService.uploadFile(newPath, Buffer.from(body, 'utf8'));
     try { await this.sftpService.deleteFile(oldPath); } catch (_) { /* best-effort cleanup */ }
 

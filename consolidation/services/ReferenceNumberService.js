@@ -9,10 +9,7 @@ class ReferenceNumberService {
     this.sapCounters = new Map();
   }
 
-  // Clear the in-memory counters so the next run re-reads the DB max sequence.
-  // Without this, a cached singleton service remembers the previous run's
-  // counter and keeps incrementing (e.g. 0001 -> 0002) even after documents
-  // are deleted.
+
   resetCounters() {
     this.consolCounters.clear();
     this.sapCounters.clear();

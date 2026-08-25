@@ -38,7 +38,7 @@ class ErrorFileHandler {
       throw new Error(`ERROR path missing for file ${file.name}. Please check SFTP folder configuration.`);
     }
 
-    // 1. Collect all candidate source paths where the CSV could be sitting on SFTP
+  
     const candidates = [
       ...new Set([
         file.path,
@@ -92,7 +92,7 @@ class ErrorFileHandler {
       }
     }
 
-    // Always write text error file even if the move failed
+   
     const textBuf = this._buildErrorTextFile(file, error, context, moveError);
     const textName = this._buildErrorTextFileName(file.name);
     const textPath = `${errorDirectory}/${textName}`;

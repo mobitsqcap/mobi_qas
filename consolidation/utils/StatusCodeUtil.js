@@ -4,7 +4,7 @@ const cds = require('@sap/cds');
 const { INSERT } = cds.ql;
 
 const STATUS = Object.freeze({
-  // General processing
+  
   '001': 'STARTED',
   '002': 'PROCESSING',
   '003': 'COMPLETED',
@@ -15,7 +15,7 @@ const STATUS = Object.freeze({
   '008': 'CANCELLED',
   '009': 'RETRYING',
   '010': 'SKIPPED',
-  // File
+
   '011': 'FILE_RECEIVED',
   '012': 'FILE_NOT_FOUND',
   '013': 'EMPTY_FILE',
@@ -26,7 +26,7 @@ const STATUS = Object.freeze({
   '018': 'FILE_DOWNLOAD_FAILED',
   '019': 'FILE_MOVE_FAILED',
   '020': 'SFTP_CONNECTION_FAILED',
-  // Master
+  
   '021': 'ACTIVE',
   '022': 'INACTIVE',
   '023': 'VALIDATION_FAILED',
@@ -37,7 +37,7 @@ const STATUS = Object.freeze({
   '028': 'FIELD_LENGTH_EXCEEDED',
   '029': 'INVALID_TYPE',
   '030': 'INVALID_PORTAL',
-  // Validation
+
   '031': 'INVALID_COMPANY',
   '032': 'INVALID_COUNTRY',
   '033': 'INVALID_AMOUNT',
@@ -48,22 +48,22 @@ const STATUS = Object.freeze({
   '038': 'INVALID_DATE',
   '039': 'REFERENCE_TOO_LONG',
   '040': 'EXPONENTIAL_REFERENCE',
-  // Transaction
+
   '041': 'TRANSACTION_SUCCESS',
   '042': 'TRANSACTION_FAILED',
   '043': 'TRANSACTION_PENDING',
   '044': 'TRANSACTION_RETURN',
-  // Duplicate checks
+  
   '045': 'DUPLICATE_MOBI_REFERENCE',
   '046': 'DUPLICATE_HOST_REFERENCE',
   '047': 'MOBI_REFERENCE_EXISTS',
   '048': 'HOST_REFERENCE_EXISTS',
-  // Master validation
+ 
   '049': 'INVALID_MERCHANT',
   '050': 'INVALID_HOST',
   '051': 'INVALID_PORTAL_MASTER',
   '052': 'INVALID_COMPANY_PORTAL',
-  // Consolidation
+
   '053': 'CONSOLIDATION_PENDING',
   '054': 'CONSOLIDATION_SUCCESS',
   '055': 'CONSOLIDATION_FAILED',
@@ -71,11 +71,11 @@ const STATUS = Object.freeze({
   '057': 'MERCHANT_BP_MISSING',
   '058': 'HOST_BP_MISSING',
   '059': 'BP_MASTER_MISSING',
-  // Posting
+
   '060': 'POSTING_PENDING',
   '061': 'POSTED',
   '062': 'POSTING_FAILED',
-  // Master data lookup (unified, requirement change)
+
   '063': 'NO_MASTER_DATA_FOUND',
   '100': 'UNKNOWN_ERROR'
 });

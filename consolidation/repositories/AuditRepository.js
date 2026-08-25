@@ -26,7 +26,7 @@ const ENTITY = EntityNames.AUDIT;
 class AuditRepository {
   constructor({ softFail = false } = {}) {
     this.softFail = softFail;
-    this.lineItemCounters = new Map(); // auditId -> next auditLineItem
+    this.lineItemCounters = new Map(); 
   }
 
   _nextAuditLineItem(auditId) {

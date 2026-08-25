@@ -20,24 +20,15 @@ const UnifiedIngestionHandler = require('../master-ingestion/handlers/UnifiedIng
 module.exports = cds.service.impl(async function () {
   await StatusCodeUtil.ensureStatusTable();
 
-  // ---------------------------------------------------------------
-  // Repositories
-  // ---------------------------------------------------------------
   const masterRepository = new MasterRepository();
   const fileLogRepository = new FileLogRepository();
   const auditRepository = new AuditRepository();
 
-  // ---------------------------------------------------------------
-  // Services
-  // ---------------------------------------------------------------
   const sftpService = new SftpService();
   const masterCsvService = new MasterCsvService();
   const masterUpsertService = new MasterUpsertService(masterRepository);
   const fileHashService = new FileHashService(fileLogRepository);
 
-  // ---------------------------------------------------------------
-  // Handlers
-  // ---------------------------------------------------------------
   const errorFileHandler = new ErrorFileHandler(sftpService);
   const successFileHandler = new SuccessFileHandler(sftpService);
   const masterFileHandler = new MasterFileHandler({
@@ -63,10 +54,6 @@ module.exports = cds.service.impl(async function () {
     masterRepository,
     masterCsvService
   });
-
-  // ---------------------------------------------------------------
-  // Actions
-  // ---------------------------------------------------------------
   const actorOf = (req) =>
     req?.user?.id || req?.user?.attr?.email || req?.user?.attr?.user_name || 'UNKNOWN_USER';
 
@@ -111,10 +98,9 @@ module.exports = cds.service.impl(async function () {
       };
     }
     try {
-      // 1. Bulk Update Master Table (sets STATUS_CODE = '063' on success)
+    
       const masterCount = await masterRepository.updateMasterStatusBatch(items);
 
-      // 2. Create new rows in MOBI_DB_AUDIT (PROCESS_TYPE = 'CPI TO SAP', PROCESS_NAME = 'INTEGRATION', etc.)
       const auditCount = await auditRepository.createRecordAuditFromCPIBatch(items);
 
       return {

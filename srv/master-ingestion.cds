@@ -1,12 +1,7 @@
 using { mobi.db as db } from '../db/schema';
 
-// Interactive users authenticate through XSUAA; Job Scheduler and CPI use
-// client-credentials tokens and are represented by CAP as system-user.
-// @requires: ['authenticated-user', 'system-user']
 service IngestionMasterService {
 
-  // Preserve the existing projection capabilities for Master-BP administrators.
-  // Trigger operators receive read-only visibility for operational support.
   @restrict: [
     { grant: '*',    to: 'AdminMasterBP' },
     { grant: 'READ', to: 'OperationsTrigger' },
@@ -28,16 +23,12 @@ service IngestionMasterService {
 
   function getStatus() returns String;
 
-  // Human operators use OperationsTrigger; scheduled executions use Jobs.
-  // @requires: ['OperationsTrigger', 'Jobs']
   action triggerMasterIngestion() returns {
     filesProcessed : Integer;
     message        : String;
     logs           : array of String;
   };
 
-  // Restricted to the CPI/OAuth posting-callback identity. A normal trigger
-  // operator cannot overwrite BP status or create CPI audit rows.
   @requires: 'PostingCallback'
   action replicateMasterStatusToAudit(
     items : array of {

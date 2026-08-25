@@ -72,9 +72,7 @@ const STATUS = Object.freeze({
   '060': 'POSTING_PENDING',
   '061': 'POSTED',
   '062': 'POSTING_FAILED',
-  // Master data lookup (unified, requirement change)
   '063': 'NO_MASTER_DATA_FOUND',
-  // NEW: txn_paid_date consistency (2026-08-18)
   '064': 'INVALID_TXN_PAID_DATE',
   '065': 'INVALID_BALANCE_CHECK',
   '100': 'UNKNOWN_ERROR'
@@ -124,8 +122,6 @@ const FRIENDLY = Object.freeze({
     `MOBI_REFERENCE_ID "${ref}" already exists in the database. Please use a unique reference ID.`,
   duplicateHostRefDb: (ref) =>
     `HOST_REFERENCE_ID "${ref}" already exists for the same transaction day in the database.`,
-  // Requirement change: unified master-data lookup message. {value} is the
-  // merchant id / host name / portal / company that could not be found.
   noMasterDataFound: (value) =>
     `No master data found "${value}"`,
   invalidMerchant: (id) =>
@@ -142,18 +138,10 @@ const FRIENDLY = Object.freeze({
     `Failed to download file "${remotePath}". Reason: ${reason}.`,
   sftpConnection: (reason) =>
     `SFTP connection failed: ${reason}. Please verify destination configuration.`,
-  // NEW: txn_paid_date consistency
   invalidPaidDate: (distinctValues) => {
     const display = (distinctValues || []).map((v) => v ? `"${v}"` : '"(empty)"').join(', ');
     return `Inconsistent txn_paid_date values found: [${display}]. All rows in the file must have the same txn_paid_date. Please correct the file so that txn_paid_date is consistent and re-upload.`;
   },
-  // invalidBalanceCheck: (distinctValues) => {
-  //   const display = (distinctValues || []).map((v) => {
-  //     const s = String(v ?? '').trim();
-  //     return s ? `"${s}"` : '"(empty)"';
-  //   }).join(', ');
-  //   return `Invalid balance_check value(s) found: [${display}]. Every row must have balance_check equal to 0 (for example 0 or 0.00). Blank, missing, or any non-zero value rejects the entire file. Please set balance_check to 0 on all rows and re-upload.`;
-  // }
     invalidBalanceCheck: (value) => {
     const s = String(value ?? '').trim();
     const display = s ? `"${s}"` : '"(empty)"';
@@ -186,11 +174,6 @@ function describe(value) {
   return { code, text: toText(code) };
 }
 
-/**
- * Canonical, fully-concatenated error detail for a record. Used by BOTH the
- * error text file and the audit so they always show the exact same string.
- * Format: "CODE1: message1 || CODE2: message2".
- */
 function concatErrorDetail(errors) {
   if (!errors?.length) return '';
   return errors
@@ -202,12 +185,6 @@ function concatErrorDetail(errors) {
     .join(' || ');
 }
 
-/**
- * Resolve the canonical detail for an already-validated record. Prefers the
- * structured validation errors; falls back to STATUS_MESSAGE for file-level
- * errors (duplicate file name, invalid file name, hard failure) that have no
- * structured errors.
- */
 function recordErrorDetail(record) {
   const errors = record?._VALIDATION_ERRORS || [];
   if (errors.length) return concatErrorDetail(errors);
@@ -239,7 +216,6 @@ async function ensureStatusTable() {
   }
 }
 
-// Kept for backward compatibility with any caller that used the [n] (code) format.
 function joinErrorDetails(errors) {
   if (!errors?.length) return '';
   return errors

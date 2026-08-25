@@ -79,17 +79,10 @@ class AuditRepository {
         .limit(1)
     );
     const max = rows && rows.length ? Number(rows[0].AUDIT_LINE_ITEM || 0) : 0;
-    return Math.max(1, max) + 1; // 1 is reserved for the FILE summary row
+    return Math.max(1, max) + 1;
   }
 
-  // ------------------------------------------------------------------
-  // FILE-LEVEL SUMMARY ROW ( AUDIT_LINE_ITEM = 1, PROCESS_TYPE = FILE )
-  // ------------------------------------------------------------------
-
-  /**
-   * Creates the file-level summary row.
-   * e.g. MASTER_INGESTION | FILE | I | "File Master_20260806.csv received. Processing started."
-   */
+  
   async start({
     auditId,
     runId,
@@ -131,11 +124,7 @@ class AuditRepository {
     );
   }
 
-  /**
-   * Final state of the FILE summary row.
-   * MESSAGE_TYPE: W (Warning) when errors > 0 (as in the Excel), otherwise S (Success).
-   * Message always includes the file name.
-   */
+
   async complete(auditId, result, changedBy, options = {}) {
     if (!auditId) return;
     const db = await cds.connect.to('db');
@@ -174,9 +163,6 @@ class AuditRepository {
     );
   }
 
-  // ------------------------------------------------------------------
-  // RECORD INGESTION ROWS ( PROCESS_TYPE = SFTP TO BTP )
-  // ------------------------------------------------------------------
 
   /**
    * Record-level rows for one file.
@@ -204,12 +190,12 @@ class AuditRepository {
     if (!validRecords.length && !errorRows.length) return 0;
     const db = await cds.connect.to('db');
     const now = this._now();
-    const fileAuditId = auditId || uuid(); // fallback only - callers should always pass the file audit id
+    const fileAuditId = auditId || uuid(); 
     const file = fileName || (await this._fileNameFor(db, fileAuditId));
     let nextId = await this._nextProcessId(db, fileAuditId);
     const entries = [];
 
-    // ---- valid records (inserted / skipped) -------------------------
+   
     for (const r of validRecords) {
       const rowNo = r._rowNumber || r.ROW_NO || r.rowNo || '';
       entries.push({
@@ -228,7 +214,7 @@ class AuditRepository {
       });
     }
 
-    // ---- error rows --------------------------------------------------
+   
     for (const e of errorRows) {
       const detail = this._text(e.errorDetail || e.detail || '');
       entries.push({
@@ -257,24 +243,12 @@ class AuditRepository {
     return written;
   }
 
-  // ------------------------------------------------------------------
-  // CPI TO SAP STATUS REPLICATION ( PROCESS_NAME = INTEGRATION )
-  // ------------------------------------------------------------------
-
-  /**
-   * Creates record rows for CPI results.
-   * e.g. INTEGRATION | CPI TO SAP | S | "Row 1| 60000571 created successfully for 2201 | File: Master_20260806.csv"
-   *      INTEGRATION | CPI TO SAP | E | "Row 3| Error Passed by CPI | File: Master_20260806.csv"
-   *
-   * NOTE: the FILE summary row (AUDIT_LINE_ITEM = 1) is intentionally NOT touched here -
-   * its STATUS_MESSAGE stays as the ingestion result.
-   */
   async createRecordAuditFromCPIBatch(items) {
     if (!items || !items.length) return 0;
     const db = await cds.connect.to('db');
     const now = this._now();
 
-    // Preload master rows to resolve the file AUDIT_ID, BP number and row number
+    
     const ids = [...new Set((items || []).map((i) => i.ID).filter(Boolean))];
     const masterMap = new Map();
     if (ids.length) {
@@ -292,8 +266,7 @@ class AuditRepository {
       }
     }
 
-    // Group items by target file AUDIT_ID so the AUDIT_LINE_ITEM sequence stays per file
-    const groups = new Map(); // fileAuditId -> { entries: [] }
+    const groups = new Map(); 
     for (const item of items) {
       const masterRow = masterMap.get(item.ID);
       const fileAuditId = item.AUDIT_ID || (masterRow && masterRow.AUDIT_ID) || uuid();
@@ -310,7 +283,7 @@ class AuditRepository {
 
       const entry = {
         AUDIT_ID: fileAuditId,
-        AUDIT_LINE_ITEM: 0, // assigned after grouping (per-file sequence)
+        AUDIT_LINE_ITEM: 0, 
         PROCESS_NAME: 'INTEGRATION',
         PROCESS_TYPE: 'CPI TO SAP',
         MESSAGE_TYPE: isSuccess ? safe('SUCCESS') : safe('ERROR'),

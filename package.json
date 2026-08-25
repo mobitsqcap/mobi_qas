@@ -25,7 +25,7 @@
     "undeploy": "cf undeploy mobi_dev_cap --delete-services --delete-service-keys --delete-service-brokers",
     "build": "rimraf resources mta_archives && mbt build --mtar archive",
     "deploy": "cf deploy mta_archives/archive.mtar --retries 1",
-    "watch-display_glvlookup": "cds watch --open displayglvlookup/index.html?sap-ui-xx-viewCache=false --livereload false",
+     "watch-display_glvlookup": "cds watch --open displayglvlookup/index.html?sap-ui-xx-viewCache=false --livereload false",
     "watch-masterbpupload": "cds watch --open masterbpupload/index.html?sap-ui-xx-viewCache=false --livereload false"
   },
   "private": true,

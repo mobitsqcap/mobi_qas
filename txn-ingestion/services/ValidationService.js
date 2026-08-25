@@ -63,11 +63,9 @@ class ValidationService {
   createContext() {
     return {
       mobiReferencesSeen: new Set(),
-      // hostReferencesSeen REMOVED - HOST_REFERENCE_ID has no validation
       masterIndex: null
     };
   }
-
   _validateInFileDuplicates(record, context, errors) {
     const mobiReference = String(record.MOBI_REFERENCE_ID || '').trim();
     if (mobiReference) {
@@ -80,11 +78,6 @@ class ValidationService {
       context.mobiReferencesSeen.add(mobiReference);
     }
 
-    // HOST_REFERENCE_ID: NO VALIDATION
-    // - duplicates within file are allowed
-    // - duplicates per day are allowed
-    // - empty values are allowed
-    // Previously checked DUPLICATE_HOST_REFERENCE here - removed
   }
 
   _buildMasterIndex(masters) {
@@ -110,10 +103,6 @@ class ValidationService {
     const merchantKey = key(record.MOBI_PORTAL_CODE, record.COMPANY_CODE, record.MERCHANT_ID);
     const hostKey = key(record.MOBI_PORTAL_CODE, record.COMPANY_CODE, record.HOST_NAME);
 
-    // Requirement change: every missing master-data element produces the unified
-    // NO_MASTER_DATA_FOUND code with "No master data found "{value}"". All such
-    // issues are collected (no early return) so the full set is concatenated into
-    // one canonical error detail for the text file and the audit.
     const noMasterCode = StatusCodeUtil.toCode('NO_MASTER_DATA_FOUND');
 
     if (!index.portalCodes.has(portalKey)) {
@@ -163,8 +152,6 @@ class ValidationService {
   _markInvalid(record, errors) {
     record.ROW_STATUS = Constants.ROW_STATUS.INVALID;
     record.STATUS_CODE = StatusCodeUtil.joinErrorCodes(errors);
-    // STATUS_MESSAGE holds the canonical, fully-concatenated detail — identical
-    // to what the error text file and the audit will display for this record.
     record.STATUS_MESSAGE = StatusCodeUtil.concatErrorDetail(errors).slice(0, 500);
     record._VALIDATION_ERRORS = errors;
     return record;

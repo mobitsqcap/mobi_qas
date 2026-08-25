@@ -1,14 +1,10 @@
-// master bp upload srv
+
 
 const cds = require('@sap/cds');
 const { v4: uuid } = require('uuid');
 const path = require('path');
 const fs = require('fs');
 
-/* ------------------------------------------------------------------ */
-/* Locate your master-ingestion folder (works wherever it lives:       */
-/*   <project>/master-ingestion   OR   <project>/srv/master-ingestion) */
-/* ------------------------------------------------------------------ */
 function resolveIngestionBase() {
   const candidates = [
     path.join(__dirname, '..', 'master-ingestion'),
@@ -76,13 +72,6 @@ class MasterUploadService {
     this.validator = new MasterValidator();
   }
 
-  /**
-   * @param {object} p
-   * @param {Array}  p.records   UI payload (DB-style field names, see service .cds)
-   * @param {string} p.fileName  uploaded file name (for traceability only)
-   * @param {string} [p.actor]   logged in user id
-   * @returns summary + per-row errors for the UI table
-   */
   async processUpload({ records = [], fileName = 'Master_BP_Upload.xlsx', actor }) {
     if (!records.length) {
       const e = new Error('No records were sent from the app. Please upload a file with at least one data row.');
@@ -94,12 +83,8 @@ class MasterUploadService {
     const auditId = uuid();
     const fileId = HashUtil.sha256(`${fileName}|${now}`);
     const fileHash = HashUtil.sha256(JSON.stringify(records));
-    // Created-by is ALWAYS the system user for the master flow (audit/filelog/master rows)
-    const changedBy = Constants.SYSTEM_USERS.SFTP; // 'SYSTEM_SFTP'
 
-    /* -------------------------------------------------------------- */
-    /* 1) Map UI payload -> MasterRecord (same shape as CSV ingestion) */
-    /* -------------------------------------------------------------- */
+    const changedBy = Constants.SYSTEM_USERS.SFTP; 
     const mapped = records.map((r, idx) =>
       MasterRecord.fromCsvRow(
         {
@@ -117,14 +102,10 @@ class MasterUploadService {
           business_reg_no_tin: r.BUSINESS_REG_NO_TIN,
           host_name: r.HOST_NAME
         },
-        idx + 2 // excel-style row number (row 1 = header)
+        idx + 2 
       )
     );
 
-    /* -------------------------------------------------------------- */
-    /* 2) Mandatory for THIS flow: BP_NUMBER + EXTERNAL_BP_NUMBER       */
-    /*    (they are optional in the SFTP flow, so checked separately)   */
-    /* -------------------------------------------------------------- */
     const extraErrors = [];
     const candidates = [];
     for (const rec of mapped) {
@@ -172,15 +153,13 @@ class MasterUploadService {
         FILE_NAME: fileName,
         RECORD_NUMBER: index + 1,
         POSTING_STATUS: '01',
-        STATUS_CODE: '063',          // BP_CREATED_SUCCESS -> CPI skips these
+        STATUS_CODE: '063',        
         BP_CREATION_DATE: now,
         ACTIVE_FLAG: Constants.ACTIVE_FLAG,
         CREATED_BY: changedBy,
         CREATED_TIMESTAMP: now,
         CHANGED_BY: ' '
       };
-      // Spread does NOT copy non-enumerable properties; keep the CSV-style row
-      // number so the audit rows show the correct "Row N| ..." value.
       Object.defineProperty(copy, '_rowNumber', { value: record._rowNumber, enumerable: false });
       return copy;
     });
@@ -190,7 +169,7 @@ class MasterUploadService {
         await this.masterRepository.upsertBatch(enriched);
         inserted = enriched.length;
       } catch (upsertErr) {
-        // HANA unique constraint (301) => duplicate slipped in
+       
         const msg = String(upsertErr?.message || '').toLowerCase();
         if (upsertErr?.code == 301 || msg.includes('unique constraint') || msg.includes('duplicate')) {
           const sampleId = enriched[0]?.ID || '';
@@ -211,9 +190,6 @@ class MasterUploadService {
     const validCount = inserted;
     const errorCount = totalRows - inserted;
 
-    /* -------------------------------------------------------------- */
-    /* 6) Traceability: FILELOG + AUDIT (summary + record rows)         */
-    /* -------------------------------------------------------------- */
     const errorDetail = allErrors.length
       ? ErrorMessageUtil.generateFileErrorSummary(allErrors, totalRows, validCount, errorCount)
       : '';
@@ -269,9 +245,6 @@ class MasterUploadService {
       console.warn(`[MasterUploadService] audit write failed: ${auditErr.message}`);
     }
 
-    /* -------------------------------------------------------------- */
-    /* 7) Result back to the UI                                         */
-    /* -------------------------------------------------------------- */
     const message =
       errorCount === 0
         ? `${inserted} record(s) inserted into MOBI_DB_MASTER with STATUS_CODE 063 (BP_CREATED_SUCCESS).`
@@ -291,7 +264,6 @@ class MasterUploadService {
     };
   }
 
-  /** composite-key set (portal|company|id) - same logic as UnifiedIngestionHandler */
   async _loadExistingIdKeys(candidates) {
     const keySet = new Set();
     const ids = [
@@ -318,19 +290,15 @@ class MasterUploadService {
     return keySet;
   }
 }
-
-/* ------------------------------------------------------------------ */
-/* CDS SERVICE WIRING - this is the part that was missing!             */
-/* ------------------------------------------------------------------ */
 module.exports = cds.service.impl(async function () {
   await StatusCodeUtil.ensureStatusTable();
 
-  // Repositories (reuse the master-ingestion classes)
+  
   const masterRepository = new MasterRepository();
   const fileLogRepository = new FileLogRepository();
   const auditRepository = new AuditRepository();
 
-  // Upload engine (validation + insert + audit)
+  
   const masterUploadService = new MasterUploadService({
     masterRepository,
     fileLogRepository,
@@ -342,11 +310,7 @@ module.exports = cds.service.impl(async function () {
 
   this.on('getStatus', () => 'Master BP upload service is up');
 
-  /**
-   * uploadMasterRecords
-   * Inserts manually maintained (already-created) BP numbers into
-   * MOBI_DB_MASTER with STATUS_CODE '063' so CPI skips them.
-   */
+ 
   this.on('uploadMasterRecords', async (req) => {
     const { fileName, records } = req.data || {};
     const actor = actorOf(req);

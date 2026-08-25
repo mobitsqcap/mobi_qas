@@ -25,9 +25,6 @@ class TransactionRecord {
     if (String(row.txn_time_paid || '').trim() && !paidTime) {
       dateErrors.push(`INVALID_TIME: ${row.txn_time_paid}`);
     }
-
-    // Extract raw string for strict validation
-    // Distinguishes empty from user-entered 0
     const balanceCheckRaw = String(row.balance_check || '').trim();
     const balanceCheckNum = balanceCheckRaw
       ? Number(balanceCheckRaw.replace(/,/g, ''))
@@ -77,10 +74,8 @@ class TransactionRecord {
       CONSOL_STATUS: StatusCodeUtil.toText(StatusCodeUtil.toCode('PENDING')),
       CONSOL_REF_ID: '',
 
-      // Parsed number for DB
       BALANCE_CHECK: balanceCheckNum,
 
-      // Raw value for strict validation
       _BALANCE_CHECK_RAW: balanceCheckRaw,
 
       ROW_STATUS: '',

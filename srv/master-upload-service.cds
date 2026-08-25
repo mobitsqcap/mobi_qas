@@ -1,18 +1,6 @@
 using { mobi.db as db } from '../db/schema';
 
 
-/**
- * MasterUploadService
- * ------------------------------------------------------------------
- * SEPARATE service for the "Master BP Upload" UI app only.
- * Your existing IngestionMasterService is NOT touched by this app.
- *
- * Endpoint:  /odata/v4/master-upload
- *
- * Purpose: manual upload of merchants whose BP number was ALREADY
- * created in SAP Public Cloud. Inserts into MOBI_DB_MASTER with
- * STATUS_CODE '063' (BP_CREATED_SUCCESS) so CPI skips these records.
- */
 @requires: 'authenticated-user'
 service MasterUploadService @(path : 'master-upload') {
 
@@ -30,13 +18,6 @@ service MasterUploadService @(path : 'master-upload') {
   function getStatus() returns String;
 
 
-  /* ------------------------------------------------------------------ */
-  /* records carries ALL MOBI_DB_MASTER fields:                          */
-  /*  - core fields are validated + duplicate-checked                    */
-  /*  - optional master fields: filled = used, blank = derived           */
-  /*  - AUDIT_ID, STATUS_CODE, FILE_ID, FILE_NAME, RECORD_NUMBER are     */
-  /*    ALWAYS overridden by the backend; STATUS_CODE forced to '063'    */
-  /* ------------------------------------------------------------------ */
   @requires: 'AdminMasterBP'
   action uploadMasterRecords(
 
@@ -46,7 +27,7 @@ service MasterUploadService @(path : 'master-upload') {
 
       /* ---- core fields ---- */
       ID                        : String(20);
-      AUDIT_ID                  : String(36);  // accepted, always overridden
+      AUDIT_ID                  : String(36); 
       MOBI_PORTAL_CODE          : String(2);
       SAP_COMPANY_CODE          : String(4);
       TYPE                      : String(20);
@@ -75,14 +56,13 @@ service MasterUploadService @(path : 'master-upload') {
       SALES_ORGANIZATION        : String(4);
       ACTIVE_FLAG               : String(1);
 
-      /* ---- system fields (accepted, always overridden by backend) ---- */
-      STATUS_CODE               : String(3);   // forced to '063'
+     
+      STATUS_CODE               : String(3);  
       FILE_ID                   : String(64);
       FILE_NAME                 : String(100);
-      RECORD_NUMBER             : String(10);  // String on purpose - value ignored, backend assigns the Integer
-      BP_CREATION_DATE          : String(50);  // free text date, parsed by backend (blank = now)
+      RECORD_NUMBER             : String(10); 
+      BP_CREATION_DATE          : String(50); 
 
-      /* ---- extra master column ---- */
       ROW_NO                    : Integer;  
 
     }

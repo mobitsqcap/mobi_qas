@@ -12,7 +12,7 @@ const TransactionRepository = require('../repositories/TransactionRepository');
 const AuditRepository = require('../repositories/AuditRepository');
 const ReferenceNumberService = require('../services/ReferenceNumberService');
 
-// Minimal infra shim — replace with your project's real infra if present.
+
 let infra;
 try { infra = require('../../infra'); } catch (_) { infra = null; }
 

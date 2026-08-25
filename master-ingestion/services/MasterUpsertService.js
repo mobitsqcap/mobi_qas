@@ -15,9 +15,9 @@ class MasterUpsertService {
       FILE_NAME: fileName,
       RECORD_NUMBER: index + 1,
       POSTING_STATUS: '01',
-      STATUS_CODE: '006', // 'SUCCESS' so CPI picks it up!
+      STATUS_CODE: '006', 
       BP_CREATION_DATE: now,
-      CREATED_BY: 'SYSTEM_SFTP', // always the system user for the master flow
+      CREATED_BY: 'SYSTEM_SFTP',
       CREATED_TIMESTAMP: now,
       CHANGED_BY: ''
     }));

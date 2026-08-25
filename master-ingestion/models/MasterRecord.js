@@ -62,8 +62,8 @@ class MasterRecord {
       SALES_ORGANIZATION: sapCompanyCodeRaw.substring(0, 4) || ' ',
       ACTIVE_FLAG: Constants.ACTIVE_FLAG,
       POSTING_STATUS: '01',
-      STATUS_CODE: '006', // <-- Set to '006' ('SUCCESS') so CPI picks it up!
-      // internal fields used for error reporting
+      STATUS_CODE: '006',
+    
       _rowNumber: rowNumber,
       _rawId: rawId
     };

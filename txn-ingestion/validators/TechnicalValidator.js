@@ -28,8 +28,6 @@ class TechnicalValidator {
       ['MERCHANT_ID', record.MERCHANT_ID],
       ['HOST_NAME', record.HOST_NAME],
 
-      // BALANCE_CHECK is required.
-      // Use the raw value so blank and 0 can be distinguished.
       ['BALANCE_CHECK', record._BALANCE_CHECK_RAW]
     ];
 
@@ -42,7 +40,6 @@ class TechnicalValidator {
       }
     }
 
-    // BALANCE_CHECK must be a valid number when provided.
     const balanceCheckRaw = String(
       record._BALANCE_CHECK_RAW || ''
     ).trim();
@@ -90,8 +87,6 @@ class TechnicalValidator {
       });
     }
 
-    // HOST_REFERENCE_ID: NO VALIDATION
-    // Only MOBI_REFERENCE_ID is validated for length / exponential format.
     const mobiRef = String(
       record.MOBI_REFERENCE_ID || ''
     ).trim();

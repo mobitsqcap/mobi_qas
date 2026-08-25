@@ -10,11 +10,8 @@
 const cds = require('@sap/cds');
 const { INSERT } = cds.ql;
 
-/* ------------------------------------------------------------------ */
-/* Global Status Codes                                                */
-/* ------------------------------------------------------------------ */
 const STATUS = Object.freeze({
-  // General Processing
+ 
   '001': 'STARTED',
   '002': 'PROCESSING',
   '003': 'COMPLETED',
@@ -25,7 +22,7 @@ const STATUS = Object.freeze({
   '008': 'CANCELLED',
   '009': 'RETRYING',
   '010': 'SKIPPED',
-  // File
+ 
   '011': 'FILE_RECEIVED',
   '012': 'FILE_NOT_FOUND',
   '013': 'EMPTY_FILE',
@@ -36,7 +33,7 @@ const STATUS = Object.freeze({
   '018': 'FILE_DOWNLOAD_FAILED',
   '019': 'FILE_MOVE_FAILED',
   '020': 'SFTP_CONNECTION_FAILED',
-  // Master
+
   '021': 'ACTIVE',
   '022': 'INACTIVE',
   '023': 'VALIDATION_FAILED',
@@ -47,7 +44,7 @@ const STATUS = Object.freeze({
   '028': 'FIELD_LENGTH_EXCEEDED',
   '029': 'INVALID_TYPE',
   '030': 'INVALID_PORTAL',
-  // Validation
+
   '031': 'INVALID_COMPANY',
   '032': 'INVALID_COUNTRY',
   '033': 'INVALID_AMOUNT',
@@ -58,22 +55,22 @@ const STATUS = Object.freeze({
   '038': 'INVALID_DATE',
   '039': 'REFERENCE_TOO_LONG',
   '040': 'EXPONENTIAL_REFERENCE',
-  // Transaction
+ 
   '041': 'TRANSACTION_SUCCESS',
   '042': 'TRANSACTION_FAILED',
   '043': 'TRANSACTION_PENDING',
   '044': 'TRANSACTION_RETURN',
-  // Duplicate Checks
+ 
   '045': 'DUPLICATE_MOBI_REFERENCE',
   '046': 'DUPLICATE_HOST_REFERENCE',
   '047': 'MOBI_REFERENCE_EXISTS',
   '048': 'HOST_REFERENCE_EXISTS',
-  // Master Validation
+
   '049': 'INVALID_MERCHANT',
   '050': 'INVALID_HOST',
   '051': 'INVALID_PORTAL_MASTER',
   '052': 'INVALID_COMPANY_PORTAL',
-  // Consolidation
+ 
   '053': 'CONSOLIDATION_PENDING',
   '054': 'CONSOLIDATION_SUCCESS',
   '055': 'CONSOLIDATION_FAILED',
@@ -81,7 +78,7 @@ const STATUS = Object.freeze({
   '057': 'MERCHANT_BP_MISSING',
   '058': 'HOST_BP_MISSING',
   '059': 'BP_MASTER_MISSING',
-  // Posting
+ 
   '060': 'POSTING_PENDING',
   '061': 'POSTED',
   '062': 'POSTING_FAILED',
@@ -89,9 +86,6 @@ const STATUS = Object.freeze({
   '100': 'UNKNOWN_ERROR'
 });
 
-/* ------------------------------------------------------------------ */
-/* Friendly Error Messages                                            */
-/* ------------------------------------------------------------------ */
 const FRIENDLY = Object.freeze({
   invalidFileName: (fileName, expected) =>
     `File name does not match the expected pattern. Received: "${fileName}".` +
@@ -204,8 +198,7 @@ function toText(code) {
  * returns 004
  */
 function toCode(arg1, arg2 = null, arg3 = null) {
-  // If 3 arguments passed (e.g. toCode('FILE', statusText, '005')),
-  // arg2 is text and arg3 is defaultCode.
+
   const text = arg3 !== null ? arg2 : arg1;
   const defaultCode = arg3 !== null ? arg3 : arg2;
 
@@ -214,7 +207,6 @@ function toCode(arg1, arg2 = null, arg3 = null) {
     .trim()
     .toUpperCase();
 
-  // Aliases for common legacy or extended status text strings
   const ALIASES = {
     'RECEIVED': '011',
     'FILE_RECEIVED': '011',
@@ -240,24 +232,14 @@ function toCode(arg1, arg2 = null, arg3 = null) {
       return code;
     }
   }
-  // If already a valid status code
+
   if (STATUS[value]) {
     return value;
   }
   return defaultCode;
 }
 
-/**
- * Returns both code and description.
- *
- * Example:
- * describe('014')
- *
- * {
- *   code: '014',
- *   text: 'INVALID_FILE_NAME'
- * }
- */
+
 function describe(code) {
   const statusCode = String(code || '')
     .padStart(3, '0');
@@ -267,13 +249,7 @@ function describe(code) {
   };
 }
 
-/* ------------------------------------------------------------------ */
-/* Populate MOBI_DB_STATUS                                             */
-/* ------------------------------------------------------------------ */
 
-/**
- * Loads status values into MOBI_DB_STATUS.
- */
 async function ensureStatusTable() {
   try {
     const db = await cds.connect.to('db');
@@ -292,8 +268,8 @@ async function ensureStatusTable() {
             .entries(chunk)
         );
       } catch (err) {
-        // Ignore duplicates
-        // Existing status records remain unchanged
+       
+        
         for (const row of chunk) {
           try {
             await db.run(
@@ -302,7 +278,7 @@ async function ensureStatusTable() {
                 .entries(row)
             );
           } catch (_) {
-            // already exists
+        
           }
         }
       }

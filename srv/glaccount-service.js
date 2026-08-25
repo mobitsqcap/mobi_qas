@@ -6,12 +6,11 @@ module.exports = cds.service.impl(async function () {
 
     const db = await cds.connect.to("db");
     console.log("Database connected:", db.name);
-const MOBI_DB_MASTER = db.entities["mobi.db.MOBI_DB_MASTER"];
-const valuelookup = db.entities["mobi.db.MOBI_DB_GLAccounts"];
+    const MOBI_DB_MASTER = db.entities["mobi.db.MOBI_DB_MASTER"];
+    const valuelookup = db.entities["mobi.db.MOBI_DB_GLAccounts"];
 
-console.log("MASTER Entity:", MOBI_DB_MASTER);
-console.log("GL Entity:", valuelookup);
-    // const { valuelookup } = cds.entities("VlGlAccounts");
+    console.log("MASTER Entity:", MOBI_DB_MASTER);
+    console.log("GL Entity:", valuelookup);
     console.log("Entity loaded:", valuelookup);
 
     this.on("uploadExcelData", async (req) => {
@@ -43,94 +42,90 @@ console.log("GL Entity:", valuelookup);
 
             console.time("HANA Insert Time");
 
- const { valuelookup } = cds.entities("VlGlAccounts");
+            const { valuelookup } = cds.entities("VlGlAccounts");
 
-const duplicateRecords = [];
-const invalidHosts = [];
+            const duplicateRecords = [];
+            const invalidHosts = [];
 
-for (const row of data) {
+            for (const row of data) {
 
-    const existing = await SELECT.one
-        .from(valuelookup)
-        .where({
-            COMPANY_CODE: row.COMPANY_CODE,
-            PAYMENT_TYPE: row.PAYMENT_TYPE,
-            PAYMENT_SUB_TYPE: row.PAYMENT_SUB_TYPE,
-            HOST_NAME: row.HOST_NAME,
-            TXN_AMOUNT: row.TXN_AMOUNT,
-            HOST_MDR_AMOUNT: row.HOST_MDR_AMOUNT,
-            HOST_FEE_PAYABLE: row.HOST_FEE_PAYABLE,
-            MOBI_MDR_AMOUNT: row.MOBI_MDR_AMOUNT,
-            MDR_REVENUE: row.MDR_REVENUE,
-            GL_Accounts: row.GL_Accounts,
-            Status: "A"
-        });
+                const existing = await SELECT.one
+                    .from(valuelookup)
+                    .where({
+                        COMPANY_CODE: row.COMPANY_CODE,
+                        PAYMENT_TYPE: row.PAYMENT_TYPE,
+                        PAYMENT_SUB_TYPE: row.PAYMENT_SUB_TYPE,
+                        HOST_NAME: row.HOST_NAME,
+                        TXN_AMOUNT: row.TXN_AMOUNT,
+                        HOST_MDR_AMOUNT: row.HOST_MDR_AMOUNT,
+                        HOST_FEE_PAYABLE: row.HOST_FEE_PAYABLE,
+                        MOBI_MDR_AMOUNT: row.MOBI_MDR_AMOUNT,
+                        MDR_REVENUE: row.MDR_REVENUE,
+                        GL_Accounts: row.GL_Accounts,
+                        Status: "A"
+                    });
 
-    if (existing) {
+                if (existing) {
 
-        duplicateRecords.push({
-            COMPANY_CODE: row.COMPANY_CODE,
-            PAYMENT_TYPE: row.PAYMENT_TYPE,
-            PAYMENT_SUB_TYPE: row.PAYMENT_SUB_TYPE,
-            HOST_NAME: row.HOST_NAME,
-            TXN_AMOUNT: row.TXN_AMOUNT,
-            HOST_MDR_AMOUNT: row.HOST_MDR_AMOUNT,
-            HOST_FEE_PAYABLE: row.HOST_FEE_PAYABLE,
-            MOBI_MDR_AMOUNT: row.MOBI_MDR_AMOUNT,
-            MDR_REVENUE: row.MDR_REVENUE,
-            GL_Accounts: row.GL_Accounts
-        });
+                    duplicateRecords.push({
+                        COMPANY_CODE: row.COMPANY_CODE,
+                        PAYMENT_TYPE: row.PAYMENT_TYPE,
+                        PAYMENT_SUB_TYPE: row.PAYMENT_SUB_TYPE,
+                        HOST_NAME: row.HOST_NAME,
+                        TXN_AMOUNT: row.TXN_AMOUNT,
+                        HOST_MDR_AMOUNT: row.HOST_MDR_AMOUNT,
+                        HOST_FEE_PAYABLE: row.HOST_FEE_PAYABLE,
+                        MOBI_MDR_AMOUNT: row.MOBI_MDR_AMOUNT,
+                        MDR_REVENUE: row.MDR_REVENUE,
+                        GL_Accounts: row.GL_Accounts
+                    });
 
-    }
+                }
+                const host = row.HOST_NAME.trim().toUpperCase();
 
-    // HOST validation
-    const host = row.HOST_NAME.trim().toUpperCase();
+                const hostExists = await SELECT.one
+                    .from(MOBI_DB_MASTER)
+                    .where`UPPER(ID) = ${host}`;
 
-    const hostExists = await SELECT.one
-        .from(MOBI_DB_MASTER)
-        .where`UPPER(ID) = ${host}`;
+                if (!hostExists) {
+                    invalidHosts.push(row.HOST_NAME);
+                }
+            }
 
-    if (!hostExists) {
-        invalidHosts.push(row.HOST_NAME);
-    }
-}
+            if (duplicateRecords.length > 0) {
 
+                req.error({
+                    code: 400,
+                    message: "Duplicate records found.",
+                    target: JSON.stringify({
+                        totalRecords: data.length,
+                        validRecords: data.length - duplicateRecords.length,
+                        duplicateRecords: duplicateRecords.length,
+                        duplicateData: duplicateRecords
+                    })
+                });
 
-// Duplicate records found
-if (duplicateRecords.length > 0) {
+                return;
+            }
 
-    req.error({
-        code: 400,
-        message: "Duplicate records found.",
-        target: JSON.stringify({
-            totalRecords: data.length,
-            validRecords: data.length - duplicateRecords.length,
-            duplicateRecords: duplicateRecords.length,
-            duplicateData: duplicateRecords
-        })
-    });
+            if (invalidHosts.length > 0) {
 
-    return;
-}
+                const uniqueInvalidHosts = [...new Set(invalidHosts)];
 
-if (invalidHosts.length > 0) {
+                req.error({
+                    code: 400,
+                    message: "Invalid Host(s): " + uniqueInvalidHosts.join(", "),
+                    target: JSON.stringify({
+                        totalRecords: data.length,
+                        validRecords: data.length - uniqueInvalidHosts.length,
+                        duplicateRecords: 0,
+                        invalidHosts: uniqueInvalidHosts.length,
+                        invalidHostNames: uniqueInvalidHosts
+                    })
+                });
 
-    const uniqueInvalidHosts = [...new Set(invalidHosts)];
-
-    req.error({
-        code: 400,
-        message: "Invalid Host(s): " + uniqueInvalidHosts.join(", "),
-        target: JSON.stringify({
-            totalRecords: data.length,
-            validRecords: data.length - uniqueInvalidHosts.length,
-            duplicateRecords: 0,
-            invalidHosts: uniqueInvalidHosts.length,
-            invalidHostNames: uniqueInvalidHosts
-        })
-    });
-
-    return;
-}
+                return;
+            }
             for (const row of data) {
 
                 const existingActive = await SELECT.one
@@ -170,45 +165,26 @@ if (invalidHosts.length > 0) {
                         });
                 }
 
-                // New record will be Active
                 row.Status = "A";
             }
 
-            // Insert only if no duplicates exist
             const result = await cds.db.run(
                 INSERT.into(valuelookup).entries(data),
                 req
             );
-
-            console.timeEnd("HANA Insert Time");
-
-            console.log("HANA Insert Completed Successfully.");
-
-            console.log("Insert Result:");
-            console.log(result);
-
-            console.log(`${data.length} records inserted successfully.`);
-
-            console.log("========== uploadExcelData END ==========");
-
             return {
                 status: "SUCCESS",
                 message: `${data.length} records inserted successfully`
             };
-
         } catch (error) {
-
-            console.error("========== ERROR OCCURRED ==========");
             console.error("Time:", new Date().toISOString());
             console.error("Error Name:", error.name);
             console.error("Error Message:", error.message);
             console.error("Error Code:", error.code);
-
             if (error.stack) {
                 console.error("Stack Trace:");
                 console.error(error.stack);
             }
-
             console.error("========== END ERROR ==========");
 
             req.error({
@@ -216,26 +192,23 @@ if (invalidHosts.length > 0) {
                 message: error.message
             });
         }
-
     });
-
     this.on("displayGLData", async (req) => {
 
-    try {
+        try {
+            const data = await SELECT.from(valuelookup);
 
-        const data = await SELECT.from(valuelookup);
+            return data;
 
-        return data;
+        } catch (error) {
 
-    } catch (error) {
+            req.error({
+                code: 500,
+                message: error.message
+            });
 
-        req.error({
-            code: 500,
-            message: error.message
-        });
+        }
 
-    }
-
-});
+    });
 
 });

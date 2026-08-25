@@ -68,9 +68,6 @@ class DomesticSettlementConsolidationBuilder extends BaseScenarioBuilder {
         const primaryField = this.scenario.amountField || 'AP_PAYOUT';
         const fallbackField = this.scenario.fallbackAmountField;
 
-        // Strict mode: when no fallback is configured, merchant lines use the
-        // primary field (TXN_AMOUNT) as-is; zero amounts are skipped by the
-        // callers below (isNonZero check).
         if (!fallbackField) return r[primaryField];
 
         return AmountUtil.isNonZero(r[primaryField])
@@ -78,14 +75,6 @@ class DomesticSettlementConsolidationBuilder extends BaseScenarioBuilder {
           : r[fallbackField];
       };
 
-      /**
-       * Line 1 style:
-       * Clearing debit for merchant payout total (amount = TXN_AMOUNT).
-       * Stored in the AP_PAYOUT column as the debit (S) "total" line.
-       *
-       * Example:
-       * Dr 48638.89 GL 17001000 Host MAYBANK / 4580001
-       */
       const addClearingDebit = () => {
         for (const hostRows of hostGroups.values()) {
           const amount = AmountUtil.sumBy(hostRows, settlementAmount);
@@ -119,13 +108,6 @@ class DomesticSettlementConsolidationBuilder extends BaseScenarioBuilder {
         }
       };
 
-      /**
-       * Line 2 style:
-       * Host MDR cost debit.
-       *
-       * Example:
-       * Dr 10.80 GL 41001400 Host MAYBANK / 4580001
-       */
       const addHostCostDebit = () => {
         for (const hostRows of hostGroups.values()) {
           const amount = AmountUtil.sum(hostRows, 'HOST_MDR_AMOUNT');
@@ -156,15 +138,6 @@ class DomesticSettlementConsolidationBuilder extends BaseScenarioBuilder {
         }
       };
 
-      /**
-       * Lines 3..n style:
-       * Merchant AP payout credit lines (amount = TXN_AMOUNT).
-       * Stored in the TRANSACTION_AMOUNT column as the credit (H)
-       * "merchant supplier" line.
-       *
-       * Example:
-       * Cr merchant amount, supplier number, no GL.
-       */
       const addMerchantApPayoutCredit = () => {
         for (const merchantRows of merchantGroups.values()) {
           const amount = AmountUtil.sumBy(merchantRows, settlementAmount);
@@ -204,13 +177,6 @@ class DomesticSettlementConsolidationBuilder extends BaseScenarioBuilder {
         }
       };
 
-      /**
-       * Final line style:
-       * Host fee payable credit.
-       *
-       * Example:
-       * Cr 10.80 GL 15002200 Host MAYBANK / 4580001
-       */
       const addHostFeePayableCredit = () => {
         for (const hostRows of hostGroups.values()) {
           const amount = AmountUtil.sumBy(hostRows, (r) =>

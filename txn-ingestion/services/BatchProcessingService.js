@@ -79,11 +79,6 @@ class BatchProcessingService {
       }
     }
 
-    // File-level rules still REJECT THE FILE (nothing inserted),
-    // but errors are attached only to the rows that actually violate them.
-    // 064: mixed txn_paid_date → only rows whose date is not the majority date
-    // 065: balance_check ≠ 0    → only those rows
-    // Clean rows are skipped in the error text file / audit error list.
     if (allRecords.length > 0) {
       const distinctPaidDates = [...new Set(
         allRecords.map((r) => String(r.TXN_PAID_DATE || '').trim().slice(0, 10))
@@ -157,7 +152,6 @@ class BatchProcessingService {
           ].filter(Boolean).join(' || ').slice(0, 255);
           await this.fileBatchRepository.markAllFailed(auditId, detail);
         } catch (_) {
-          // non-critical; file is still rejected via invalidRows
         }
 
         if (onProgress) {

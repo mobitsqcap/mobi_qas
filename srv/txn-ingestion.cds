@@ -1,8 +1,5 @@
 using { mobi.db as db } from '../db/schema';
 
-// Interactive users authenticate through XSUAA; Job Scheduler uses a
-// client-credentials token and is represented by CAP as system-user.
-// @requires: ['authenticated-user', 'system-user']
 service IngestiontxnService {
 
   @readonly
@@ -28,8 +25,6 @@ service IngestiontxnService {
 
   function getStatus() returns String;
 
-  // Human operators use OperationsTrigger; scheduled executions use Jobs.
-  // @requires: ['OperationsTrigger', 'Jobs']
   action triggerTransactionIngestion() returns {
     filesProcessed : Integer;
     message        : String;

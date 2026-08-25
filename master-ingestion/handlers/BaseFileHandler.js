@@ -38,7 +38,7 @@ class BaseFileHandler {
   }
 
   async begin(file, executionContext = {}) {
-    // Master flow ALWAYS records SYSTEM_SFTP as the creator, regardless of who triggered the run
+   
     const actor = this.systemUser || executionContext.actor || 'UNKNOWN_USER';
     const runId = executionContext.runId || file.name;
     const fileLog = await this.fileLogRepository.ensureTracked(file, actor);
@@ -149,8 +149,7 @@ class BaseFileHandler {
     let errorFilePath = null;
 
     if (result.invalidRows && result.invalidRows.length > 0) {
-      // 1. There ARE validation errors: Move CSV and generate text file in ERROR folder ONLY
-      // Do NOT move to FILE_OUT folder!
+    
       const validationError = new Error(
         `Row validation failed for ${result.errorCount} record(s). See error text file for details.`
       );
@@ -169,7 +168,7 @@ class BaseFileHandler {
       const errRes = await this.errorFileHandler.handle(file, validationError, context);
       errorFilePath = errRes && errRes.errorTextPath;
     } else {
-      // 2. There are NO errors (all records valid): Move CSV to FILE_OUT folder ONLY
+     
       await this.successFileHandler.handle(file, result, context);
     }
 
@@ -266,7 +265,7 @@ class BaseFileHandler {
     if (!this.auditRepository.insertRecordRows) return;
     try {
       const written = await this.auditRepository.insertRecordRows({
-        auditId: context.auditId, // NEW: audit rows share the file's AUDIT_ID (from MOBI_DB_FILELOG)
+        auditId: context.auditId,
         runId: context.runId,
         fileName: file.name,
         validRecords,

@@ -30,9 +30,6 @@ class BaseScenarioBuilder {
   getOutputPaymentType(record) { return this.scenario.outputPaymentType || record.PAYMENT_TYPE || this.scenario.code; }
   getOutputPaymentSubType(record) { return this.scenario.outputPaymentSubType || record.PAYMENT_SUB_TYPE || null; }
 
-  // Point 6: documents pushed to header/line items start at 060 POSTING_PENDING.
-  // CPI later flips them to 061 POSTED or 062 POSTING_FAILED.
-  // Fallback '060' guards against a stale/missing constant so STATUS_CODE is never null.
   get initialStatusCode() { return Constants.POSTING_STATUS.POSTING_PENDING || '060'; }
 
   createHeader({ consolRefId, sapRefDocument, groupRows, totals, options = {} }) {
@@ -149,8 +146,6 @@ class BaseScenarioBuilder {
     return AmountUtil.sumBy(LINE_AMOUNT_FIELDS, (field) => line[field]);
   }
 
-  // Point 5: documents whose debit != credit are not consolidated. Returns a
-  // boolean (no throw) so the service can route them to the error flow like GL/BP.
   isBalanced(document) {
     const debit = AmountUtil.toCents(document.header.TOTAL_DEBIT_AMOUNT);
     const credit = AmountUtil.toCents(document.header.TOTAL_CREDIT_AMOUNT);
