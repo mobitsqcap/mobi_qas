@@ -31,6 +31,10 @@
 			}
 		}
 	},
+	"sap.cloud": {
+		"public": true,
+		"service": "masterbpupload.service"
+	},
 	"sap.ui": {
 		"technology": "UI5",
 		"icons": {

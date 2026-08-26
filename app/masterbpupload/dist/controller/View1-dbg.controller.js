@@ -1,3 +1,4 @@
+
 sap.ui.define(
 
   [
@@ -18,18 +19,10 @@ sap.ui.define(
 
     "use strict";
 
-    /* ================================================================== */
-    /* Template field definitions - ALL MOBI_DB_MASTER fields              */
-    /* (template columns appear in exactly this DB order)                  */
-    /* required : validated as mandatory by MasterValidator / this app     */
-    /* system   : accepted in the sheet but ALWAYS assigned by the backend */
-    /* ================================================================== */
-
+  
     var TEMPLATE_FIELDS = [
 
-      /* ---- core fields ---- */
       { key: "id",                          aliases: ["id", "merchant_id"],                        required: true,  maxLen: 20,  sample: "MCHT00012345" },
-      { key: "audit_id",                    aliases: ["audit_id"],                                 required: false, maxLen: 36,  sample: "(auto by backend)" },
       { key: "mobi_portal_code",            aliases: ["mobi_portal_code", "portal_code"],          required: true,  maxLen: 2,   sample: "MY" },
       { key: "sap_company_code",            aliases: ["sap_company_code", "company_code"],         required: true,  maxLen: 4,   sample: "2000" },
       { key: "type",                        aliases: ["type", "merchant_type"],                    required: true,  maxLen: 20,  sample: "Domestic" },
@@ -42,29 +35,15 @@ sap.ui.define(
       { key: "external_bp_number",          aliases: ["external_bp_number", "external_bp"],        required: true,  maxLen: 20,  sample: "MCHT00012345" },
       { key: "bp_number",                   aliases: ["bp_number", "bp", "sap_bp_number"],         required: true,  maxLen: 10,  sample: "10004567" },
 
-      /* ---- optional master fields: filled = used as entered, blank = derived ---- */
-      { key: "grouping",                    aliases: ["grouping", "bp_grouping"],                  required: false, maxLen: 4,   sample: "blank = derived" },
       { key: "name",                        aliases: ["name", "bp_name"],                          required: false, maxLen: 40,  sample: "blank = master_name" },
       { key: "street",                      aliases: ["street"],                                   required: false, maxLen: 60,  sample: "blank = address1" },
       { key: "country_region",              aliases: ["country_region", "region"],                 required: false, maxLen: 10,  sample: "blank = country_code" },
       { key: "bp_tax_long_number",          aliases: ["bp_tax_long_number", "tax_number"],         required: false, maxLen: 50,  sample: "blank = business_reg_no_tin" },
-      { key: "language",                    aliases: ["language", "language_key"],                 required: false, maxLen: 2,   sample: "blank = EN" },
-      { key: "reconciliation_account",      aliases: ["reconciliation_account", "recon_account"],  required: false, maxLen: 10,  sample: "" },
-      { key: "check_duplicate_invoice_ind", aliases: ["check_duplicate_invoice_ind", "check_dup_inv_ind"], required: false, maxLen: 1, sample: "blank = X" },
       { key: "purchasing_organization",     aliases: ["purchasing_organization", "purchase_org", "purch_org"], required: false, maxLen: 4, sample: "blank = company code" },
-      { key: "gr_based_invoice_ind",        aliases: ["gr_based_invoice_ind", "gr_based_inv_ind"], required: false, maxLen: 1,   sample: "X or blank" },
-      { key: "business_partner_category",   aliases: ["business_partner_category", "bp_category"], required: false, maxLen: 1,   sample: "1 = Org, 2 = Person" },
-      { key: "business_partner_role",       aliases: ["business_partner_role", "bp_role"],         required: false, maxLen: 20,  sample: "" },
       { key: "sales_organization",          aliases: ["sales_organization", "sales_org"],          required: false, maxLen: 4,   sample: "blank = company code" },
-      { key: "active_flag",                 aliases: ["active_flag", "active"],                    required: false, maxLen: 1,   sample: "blank = X" },
 
-      /* ---- system fields: sheet values are ignored, backend assigns them ---- */
-      { key: "status_code",                 aliases: ["status_code"],                              required: false, maxLen: 3,   sample: "forced to 063" },
-      /* file_id / file_name intentionally NOT in the template: backend fills them in the DB */
-      { key: "record_number",               aliases: ["record_number"],                            required: false, maxLen: 10,  sample: "(auto by backend)" },
       { key: "bp_creation_date",            aliases: ["bp_creation_date"],                         required: false, maxLen: 50,  sample: "blank = now (e.g. 2025-08-01)" }
 
-      /* host_name removed from template + table per request (DB column stays, backend default) */
 
     ];
 
@@ -86,7 +65,7 @@ sap.ui.define(
 
     var EXPONENTIAL_RE = /^[+-]?\d+(\.\d+)?[eE][+-]?\d+$/;
 
-    return Controller.extend("masteruploadbp.controller.View1", {
+    return Controller.extend("masterbpupload.controller.View1", {
 
       onInit: function () {
 
@@ -94,31 +73,26 @@ sap.ui.define(
 
         this._csrfToken = null;
 
-        /* ---- the PAGE scrolls vertically; the TABLE scrolls horizontally ---- */
         var oTable = this.byId("idTable");
         if (oTable) {
-          // (a) Stop columns from shrinking to fit the screen -> HORIZONTAL scrollbar (on the table)
+        
           oTable.getColumns().forEach(function (oCol) {
             var iW = parseInt(oCol.getWidth(), 10);
             if (!isNaN(iW)) { oCol.setMinWidth(iW); }
           });
-          // (b) Fixed mode; the row count is set to the data length in onUpload,
-          //     so the table grows and the PAGE scrolls down to show all rows.
           oTable.setVisibleRowCountMode(sap.ui.table.VisibleRowCountMode.Fixed);
           oTable.setVisibleRowCount(15);
         }
 
-        /* "Leave site?" warning on browser Back / tab close while records are loaded */
         this._fnBeforeUnload = function (oEvent) {
 
           var aRows = (this.getView().getModel("tableModel").getProperty("/data")) || [];
 
           if (aRows.length) {
 
-            /* modern browsers ignore custom text and show their own dialog */
             oEvent.preventDefault();
 
-            oEvent.returnValue = ""; // required by Chrome
+            oEvent.returnValue = "";
 
           }
 
@@ -134,11 +108,6 @@ sap.ui.define(
 
       },
 
-      /* ================================================================== */
-      /* SheetJS lazy loader (local lib first, public CDN fallback)          */
-      /* Download once into webapp/lib/xlsx.full.min.js:                     */
-      /*   curl -L -o webapp/lib/xlsx.full.min.js https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js */
-      /* ================================================================== */
 
       _ensureXlsx: function () {
 
@@ -146,7 +115,7 @@ sap.ui.define(
 
         if (this._xlsxPromise) { return this._xlsxPromise; }
 
-        var sAppId = (this.getOwnerComponent().getManifestObject().getEntry("/sap.app/id") || "masteruploadbp").replace(/\./g, "/");
+        var sAppId = (this.getOwnerComponent().getManifestObject().getEntry("/sap.app/id") || "masterbpupload").replace(/\./g, "/");
 
         var aCandidates = [
 
@@ -187,7 +156,7 @@ sap.ui.define(
       },
 
       /* ================================================================== */
-      /* 1) DOWNLOAD TEMPLATE  (header "Download Template" button)           */
+      /* 1) DOWNLOAD TEMPLATE                                                */
       /* ================================================================== */
 
       onDownload: function () {
@@ -196,7 +165,7 @@ sap.ui.define(
 
           var wb = XLSX.utils.book_new();
 
-          /* Template sheet only - headers = ALL MOBI_DB_MASTER fields */
+          /* Template sheet only - headers = user-facing template fields */
 
           var wsTemplate = XLSX.utils.aoa_to_sheet([TEMPLATE_FIELDS.map(function (f) { return f.key; })]);
 
@@ -221,7 +190,7 @@ sap.ui.define(
       },
 
       /* ================================================================== */
-      /* 2) FILE SELECTED -> parse + validate + preview (change="onUpload")  */
+      /* 2) FILE SELECTED -> parse + validate + preview                      */
       /* ================================================================== */
 
       onUpload: function (oEvent) {
@@ -284,7 +253,7 @@ sap.ui.define(
 
       _resolveHeaderMapping: function (aHeaderRow) {
 
-        var map = {}; // columnIndex -> field key
+        var map = {}; 
 
         aHeaderRow.forEach(function (h, idx) {
 
@@ -306,7 +275,7 @@ sap.ui.define(
 
       _processSheetAoa: function (aoa) {
 
-        // locate header row (contains at least "id" and "bp_number")
+      
 
         var iHeaderIdx = -1;
 
@@ -332,7 +301,7 @@ sap.ui.define(
 
         var oHeaderMap = this._resolveHeaderMapping(aoa[iHeaderIdx]);
 
-        // every mandatory column must exist
+       
 
         var aPresent = Object.keys(oHeaderMap).map(function (k) { return oHeaderMap[k]; });
 
@@ -350,7 +319,7 @@ sap.ui.define(
 
         }
 
-        // data rows
+       
 
         var aRows = [];
 
@@ -378,7 +347,7 @@ sap.ui.define(
 
           if (!oRec.master_name && oRec.name) { oRec.master_name = oRec.name; }
 
-          oRec._rowNo = r + 1; // excel row number (row 1 = header)
+          oRec._rowNo = r + 1;
 
           aRows.push(oRec);
 
@@ -400,10 +369,10 @@ sap.ui.define(
 
         this.getView().getModel("tableModel").setData({ data: aRows });
 
-        // grow the table to the number of rows so the PAGE scrolls down to see them all
+      
         this.byId("idTable").setVisibleRowCount(Math.max(15, aRows.length));
 
-        // green info bar, same text as the GL vlookup app
+       
 
         var oSummary = this.byId("recordSummary");
 
@@ -415,10 +384,7 @@ sap.ui.define(
 
         oSummary.setVisible(true);
 
-        // enable push only when all rows are Valid
-
-        // this.byId("btnHanaPush").setEnabled(iInvalid === 0 && aRows.length > 0);
-        // enable push when at least one row is Valid (valid rows go, invalid stay)
+       
         this.byId("btnHanaPush").setEnabled(aRows.length > iInvalid);
         if (iInvalid > 0) {
 
@@ -430,7 +396,7 @@ sap.ui.define(
 
       },
 
-      /* client-side mirror of MasterValidator (+ bp fields mandatory in this app) */
+    
 
       _validateRows: function (aRows) {
 
@@ -462,7 +428,6 @@ sap.ui.define(
 
           });
 
-          // TYPE
 
           var sType = rec.type.trim().toLowerCase();
 
@@ -474,7 +439,6 @@ sap.ui.define(
 
           }
 
-          // Portal
 
           var sPortal = rec.mobi_portal_code.trim().toUpperCase();
 
@@ -484,7 +448,6 @@ sap.ui.define(
 
           } else { rec.mobi_portal_code = sPortal; }
 
-          // Company code
 
           var sComp = rec.sap_company_code.trim();
 
@@ -494,7 +457,7 @@ sap.ui.define(
 
           }
 
-          // Country code
+        
 
           var sCC = rec.country_code.trim().toUpperCase();
 
@@ -504,7 +467,7 @@ sap.ui.define(
 
           } else { rec.country_code = sCC; }
 
-          // TIN in exponential notation
+       
 
           if (rec.business_reg_no_tin.trim() !== "" && EXPONENTIAL_RE.test(rec.business_reg_no_tin.trim())) {
 
@@ -512,49 +475,7 @@ sap.ui.define(
 
           }
 
-          // One-character indicator fields: only "X" (or blank) allowed
-
-          ["check_duplicate_invoice_ind", "gr_based_invoice_ind", "active_flag"].forEach(function (k) {
-
-            var v = (rec[k] || "").trim().toUpperCase();
-
-            if (v !== "" && v !== "X") { push('Field "' + k + '" must be "X" or blank.'); }
-
-            else { rec[k] = v; }
-
-          });
-
-          // BP category: 1 (Organization) / 2 (Person)
-
-          var sCat = (rec.business_partner_category || "").trim();
-
-          if (sCat !== "" && ["1", "2"].indexOf(sCat) === -1) {
-
-            push('Invalid business_partner_category "' + sCat + '". Allowed: 1 (Organization), 2 (Person).');
-
-          } else { rec.business_partner_category = sCat; }
-
-          // Language: 2-letter key
-
-          var sLang = (rec.language || "").trim().toUpperCase();
-
-          if (sLang !== "" && !/^[A-Z]{2}$/.test(sLang)) {
-
-            push('Invalid language "' + rec.language + '". Use a 2-letter language key (e.g. EN).');
-
-          } else { rec.language = sLang; }
-
-          // record_number: whole number when filled (backend overrides it anyway)
-
-          var sRecNo = (rec.record_number || "").trim();
-
-          if (sRecNo !== "" && !/^\d+$/.test(sRecNo)) {
-
-            push('record_number must be a whole number.');
-
-          }
-
-          // bp_creation_date: must be a parseable date when filled
+        
 
           var sDate = (rec.bp_creation_date || "").trim();
 
@@ -564,7 +485,6 @@ sap.ui.define(
 
           }
 
-          // duplicate id within the file (case-insensitive)
 
           var sId = rec.id.trim().toUpperCase();
 
@@ -598,14 +518,8 @@ sap.ui.define(
 
       },
 
-      /* ================================================================== */
-      /* 3) UPLOAD DATA  (btnHanaPush)  ->  POST to CAP service              */
-      /* ================================================================== */
-
       _serviceBase: function () {
 
-        /* NEVER trust a broken manifest uri (e.g. //srv-api/... -> cross-origin -> "Failed to fetch").
-           Only a plain same-origin relative path pointing at master-upload is accepted. */
         var sUri = "/odata/v4/master-upload/";
         try {
           var sCfg = this.getOwnerComponent().getManifestObject().getEntry("/sap.app/dataSources/mainService/uri");
@@ -688,140 +602,8 @@ sap.ui.define(
 
       },
 
-      // onhanapush: function () {
+      /* partial upload: send only Valid rows; Invalid rows stay in the table (red) */
 
-      //   var that = this;
-
-      //   var oModel = this.getView().getModel("tableModel");
-
-      //   var aRows = oModel.getProperty("/data") || [];
-
-      //   if (!aRows.length) {
-
-      //     MessageBox.warning("Please select and review an Excel file first.");
-
-      //     return;
-
-      //   }
-
-      //   var aInvalid = aRows.filter(function (r) { return r.rowHighlight === MessageType.Error; });
-
-      //   if (aInvalid.length) {
-
-      //     MessageBox.error(aInvalid.length + " record(s) are invalid. Fix them in the Excel and re-upload.");
-
-      //     return;
-
-      //   }
-
-      //   /* send ALL template fields (uppercase DB names) - backend decides  */
-      //   /* which ones to use / derive / override                            */
-
-      //   var aPayload = aRows.map(function (r) {
-
-      //     var oRec = {};
-
-      //     TEMPLATE_FIELDS.forEach(function (f) {
-
-      //       var v = r[f.key];
-
-      //       oRec[f.key.toUpperCase()] = (v === undefined || v === null) ? "" : String(v).trim();
-
-      //     });
-
-      //     return oRec;
-
-      //   });
-
-      //   this.getView().setBusy(true);
-
-      //   this.byId("btnHanaPush").setEnabled(false);
-
-      //   this._fetchCsrfToken()
-
-      //     .then(function () { return that._postAction({ fileName: that._fileName || "Master_BP_Upload.xlsx", records: aPayload }); })
-
-      //     .then(function (oResult) {
-
-      //       oResult = oResult || {};
-
-      //       var aSrvErrors = oResult.errors || [];
-
-      //       var oStrip = that.byId("uploadSummary");
-
-      //       oStrip.setVisible(true);
-
-      //       if (aSrvErrors.length) {
-
-      //         // mark rows rejected by backend (e.g. duplicates in MOBI_DB_MASTER)
-
-      //         var oErrByRow = {};
-
-      //         aSrvErrors.forEach(function (e) { oErrByRow[Number(e.rowNo)] = e; });
-
-      //         aRows.forEach(function (rec) {
-
-      //           var e = oErrByRow[Number(rec._rowNo)];
-
-      //           if (e) {
-
-      //             rec.Status = "Invalid";
-
-      //             rec.rowHighlight = MessageType.Error;
-
-      //             rec.ErrorDetail = e.errorDetail || "Rejected by server.";
-
-      //           }
-
-      //         });
-
-      //         oModel.refresh(true);
-
-      //         oStrip.setType("Warning");
-
-      //         oStrip.setText((oResult.inserted || 0) + " record(s) inserted. " + aSrvErrors.length +
-
-      //           " rejected (duplicates/validation) - see Error Detail column.");
-
-      //         MessageBox.warning((oResult.inserted || 0) + " record(s) inserted into MOBI_DB_MASTER (STATUS 063).\n\n" +
-
-      //           aSrvErrors.length + " record(s) rejected - see the Error Detail column in the table.");
-
-      //       } else {
-
-      //         MessageToast.show("Excel uploaded successfully.");
-
-      //         oStrip.setType("Success");
-
-      //         oStrip.setText(oResult.message || ((oResult.inserted || aRows.length) +
-
-      //           " record(s) inserted into MOBI_DB_MASTER with STATUS_CODE 063 (BP_CREATED_SUCCESS). CPI will not recreate these BPs."));
-
-      //         that._resetUpload(true);
-
-      //       }
-
-      //     })
-
-      //     .catch(function (err) {
-
-      //       MessageBox.error("Upload failed: " + err.message);
-
-      //       that.byId("btnHanaPush").setEnabled(true);
-
-      //     })
-
-      //     .finally(function () {
-
-      //       that.getView().setBusy(false);
-
-      //     });
-
-      // },
-
-      /* ================================================================== */
-      /* helpers                                                             */
-      /* ================================================================== */
       onhanapush: function () {
 
         var that = this;
@@ -830,7 +612,6 @@ sap.ui.define(
 
         var aRows = oModel.getProperty("/data") || [];
 
-
         if (!aRows.length) {
 
           MessageBox.warning("Please select and review an Excel file first.");
@@ -838,9 +619,6 @@ sap.ui.define(
           return;
 
         }
-
-
-        /* partial upload: send only Valid rows; Invalid rows stay in the table (red) */
 
         var aValid = aRows.filter(function (r) { return r.rowHighlight !== MessageType.Error; });
 
@@ -854,6 +632,9 @@ sap.ui.define(
 
         }
 
+        /* payload = the template fields (uppercase DB names) + ROW_NO;      */
+        /* removed/system fields are simply not sent - the backend assigns    */
+        /* or derives them exactly like before                                */
 
         var aPayload = aValid.map(function (r) {
 
@@ -867,17 +648,15 @@ sap.ui.define(
 
           });
 
-          oRec.ROW_NO = Number(r._rowNo) || 0; // original Excel row -> accurate server error mapping
+          oRec.ROW_NO = Number(r._rowNo) || 0; 
 
           return oRec;
 
         });
 
-
         this.getView().setBusy(true);
 
         this.byId("btnHanaPush").setEnabled(false);
-
 
         this._fetchCsrfToken()
 
@@ -889,18 +668,15 @@ sap.ui.define(
 
             var aSrvErrors = oResult.errors || [];
 
-
             var oStrip = that.byId("uploadSummary");
 
             oStrip.setVisible(true);
-
 
             /* mark rows rejected by backend (duplicates / validation) */
 
             var oErrByRow = {};
 
             aSrvErrors.forEach(function (e) { oErrByRow[Number(e.rowNo)] = e; });
-
 
             aRows.forEach(function (rec) {
 
@@ -918,7 +694,6 @@ sap.ui.define(
 
             });
 
-
             /* inserted rows leave the table; rejected + skipped rows stay for fixing */
 
             var iInserted = oResult.inserted || 0;
@@ -927,21 +702,17 @@ sap.ui.define(
 
             oModel.setData({ data: aRemain });
 
-
             var sText = iInserted + " record(s) inserted into MOBI_DB_MASTER (STATUS 063)." +
 
               (aSrvErrors.length ? " " + aSrvErrors.length + " rejected by server (see Error Detail)." : "") +
 
               (iSkipped ? " " + iSkipped + " skipped (invalid rows, still red above)." : "");
 
-
             oStrip.setType((aSrvErrors.length || iSkipped) ? "Warning" : "Success");
 
             oStrip.setText(sText);
 
-
             that.byId("btnHanaPush").setEnabled(aRemain.some(function (rec) { return rec.rowHighlight !== MessageType.Error; }));
-
 
             if (!aRemain.length) {
 
@@ -972,11 +743,16 @@ sap.ui.define(
           });
 
       },
+
+      /* ================================================================== */
+      /* helpers                                                             */
+      /* ================================================================== */
+
       _resetUpload: function (bKeepResultStrip) {
 
         this.getView().getModel("tableModel").setData({ data: [] });
 
-        // shrink the table back so the page does not keep a huge empty area
+       
         var oTable = this.byId("idTable");
         if (oTable) { oTable.setVisibleRowCount(15); }
 
@@ -1002,13 +778,13 @@ sap.ui.define(
 
         MessageBox.information(
 
-          "1. Click 'Download Template' to get the Excel with ALL MOBI_DB_MASTER columns.\n" +
+          "1. Click 'Download Template' to get the Excel with the Master BP columns.\n" +
 
           "2. Mandatory: id, mobi_portal_code, sap_company_code, type, master_name, country_code, external_bp_number, bp_number (BP already created in Public Cloud).\n" +
 
-          "3. Optional columns left blank are derived by the backend (e.g. name <- master_name, street <- address1, country_region <- country_code, language <- EN, sales/purchasing org <- company code).\n" +
+          "3. Optional columns left blank are derived by the backend (e.g. name <- master_name, street <- address1, country_region <- country_code, sales/purchasing org <- company code).\n" +
 
-          "4. audit_id, status_code, file_id, file_name, record_number are always assigned by the backend; status_code is forced to 063 (BP_CREATED_SUCCESS) so CPI skips these BPs.\n" +
+          "4. System fields (audit_id, status_code, record_number, active_flag, language, grouping, BP role/category, invoice indicators, recon account) are NOT in the template - the backend assigns or derives them; status_code is always 063 (BP_CREATED_SUCCESS) so CPI skips these BPs.\n" +
 
           "5. Rows already existing in MOBI_DB_MASTER are rejected as duplicates."
 

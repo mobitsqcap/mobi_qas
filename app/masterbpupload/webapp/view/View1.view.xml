@@ -12,11 +12,9 @@
 
     >
 
-    <!-- enableScrolling="true" -> the PAGE scrolls vertically (down) to show
-         all rows. The table grows with the data instead of scrolling itself. -->
     <Page id="page" enableScrolling="true">
 
-        <!-- Header -->
+      
         <customHeader>
             <Bar>
 
@@ -56,12 +54,12 @@
 
         <content>
 
-            <!-- auto-height VBox: it grows with the table, so the PAGE scrolls down -->
+          
             <VBox
                 width="100%"
                 class="sapUiMediumMargin">
 
-                <!-- File Upload -->
+              
 
                 <HBox
                     width="80%"
@@ -87,7 +85,7 @@
 
                 </HBox>
 
-                <!-- Summary -->
+             
 
                 <MessageStrip
                     id="recordSummary"
@@ -102,11 +100,7 @@
                     type="Information"
                     class="sapUiSmallMarginBottom"/>
 
-                <!-- Preview Table : MOBI_DB_MASTER fields (template order).
-                     width="100%" + forced column minWidth (controller) => the table
-                     shows its own HORIZONTAL scrollbar. The row count is set to the
-                     data length in onUpload, so the table grows tall and the PAGE
-                     scrolls down. -->
+               
                 <t:Table
                     id="idTable"
                     rows="{tableModel>/data}"
@@ -114,15 +108,16 @@
                     width="100%"
                     enableColumnReordering="true"
                     enableColumnFreeze="true"
-                   
+
                     visibleRowCountMode="Fixed"
                     visibleRowCount="15"
                     rowHeight="38">
 
-                    <!-- paints Invalid rows RED via rec.rowHighlight set by the controller -->
+                  
                     <t:rowSettingsTemplate>
                         <t:RowSettings highlight="{tableModel>rowHighlight}"/>
                     </t:rowSettingsTemplate>
+
 
                     <t:columns>
 
@@ -130,13 +125,6 @@
                             <Label text="ID"/>
                             <t:template>
                                 <Text text="{tableModel>id}"/>
-                            </t:template>
-                        </t:Column>
-
-                        <t:Column width="130px">
-                            <Label text="Audit ID"/>
-                            <t:template>
-                                <Text text="{tableModel>audit_id}"/>
                             </t:template>
                         </t:Column>
 
@@ -217,13 +205,6 @@
                             </t:template>
                         </t:Column>
 
-                        <t:Column width="90px">
-                            <Label text="Grouping"/>
-                            <t:template>
-                                <Text text="{tableModel>grouping}"/>
-                            </t:template>
-                        </t:Column>
-
                         <t:Column width="180px">
                             <Label text="Name"/>
                             <t:template>
@@ -252,52 +233,10 @@
                             </t:template>
                         </t:Column>
 
-                        <t:Column width="80px">
-                            <Label text="Language"/>
-                            <t:template>
-                                <Text text="{tableModel>language}"/>
-                            </t:template>
-                        </t:Column>
-
-                        <t:Column width="130px">
-                            <Label text="Recon Account"/>
-                            <t:template>
-                                <Text text="{tableModel>reconciliation_account}"/>
-                            </t:template>
-                        </t:Column>
-
-                        <t:Column width="110px">
-                            <Label text="Check Dup Inv"/>
-                            <t:template>
-                                <Text text="{tableModel>check_duplicate_invoice_ind}"/>
-                            </t:template>
-                        </t:Column>
-
                         <t:Column width="120px">
                             <Label text="Purchasing Org"/>
                             <t:template>
                                 <Text text="{tableModel>purchasing_organization}"/>
-                            </t:template>
-                        </t:Column>
-
-                        <t:Column width="100px">
-                            <Label text="GR-Based Inv"/>
-                            <t:template>
-                                <Text text="{tableModel>gr_based_invoice_ind}"/>
-                            </t:template>
-                        </t:Column>
-
-                        <t:Column width="90px">
-                            <Label text="BP Category"/>
-                            <t:template>
-                                <Text text="{tableModel>business_partner_category}"/>
-                            </t:template>
-                        </t:Column>
-
-                        <t:Column width="110px">
-                            <Label text="BP Role"/>
-                            <t:template>
-                                <Text text="{tableModel>business_partner_role}"/>
                             </t:template>
                         </t:Column>
 
@@ -308,38 +247,12 @@
                             </t:template>
                         </t:Column>
 
-                        <t:Column width="80px">
-                            <Label text="Active Flag"/>
-                            <t:template>
-                                <Text text="{tableModel>active_flag}"/>
-                            </t:template>
-                        </t:Column>
-
-                        <t:Column width="90px">
-                            <Label text="Status Code"/>
-                            <t:template>
-                                <Text text="{tableModel>status_code}"/>
-                            </t:template>
-                        </t:Column>
-
-                        <!-- File ID / File Name intentionally not shown in the table or template:
-                             the backend fills them in the DB automatically -->
-
-                        <t:Column width="110px">
-                            <Label text="Record Number"/>
-                            <t:template>
-                                <Text text="{tableModel>record_number}"/>
-                            </t:template>
-                        </t:Column>
-
                         <t:Column width="150px">
                             <Label text="BP Creation Date"/>
                             <t:template>
                                 <Text text="{tableModel>bp_creation_date}"/>
                             </t:template>
                         </t:Column>
-
-                        <!-- Host Name removed from table + template per request -->
 
                         <t:Column width="100px">
                             <Label text="Status"/>

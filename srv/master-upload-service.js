@@ -72,6 +72,13 @@ class MasterUploadService {
     this.validator = new MasterValidator();
   }
 
+  /**
+   * @param {object} p
+   * @param {Array}  p.records   UI payload (DB-style field names, see service .cds)
+   * @param {string} p.fileName  uploaded file name (for traceability only)
+   * @param {string} [p.actor]   logged in user id
+   * @returns summary + per-row errors for the UI table
+   */
   async processUpload({ records = [], fileName = 'Master_BP_Upload.xlsx', actor }) {
     if (!records.length) {
       const e = new Error('No records were sent from the app. Please upload a file with at least one data row.');
@@ -83,8 +90,9 @@ class MasterUploadService {
     const auditId = uuid();
     const fileId = HashUtil.sha256(`${fileName}|${now}`);
     const fileHash = HashUtil.sha256(JSON.stringify(records));
-
+   
     const changedBy = Constants.SYSTEM_USERS.SFTP; 
+
     const mapped = records.map((r, idx) =>
       MasterRecord.fromCsvRow(
         {
@@ -102,7 +110,7 @@ class MasterUploadService {
           business_reg_no_tin: r.BUSINESS_REG_NO_TIN,
           host_name: r.HOST_NAME
         },
-        idx + 2 
+        idx + 2
       )
     );
 
@@ -153,7 +161,7 @@ class MasterUploadService {
         FILE_NAME: fileName,
         RECORD_NUMBER: index + 1,
         POSTING_STATUS: '01',
-        STATUS_CODE: '063',        
+        STATUS_CODE: '063',         
         BP_CREATION_DATE: now,
         ACTIVE_FLAG: Constants.ACTIVE_FLAG,
         CREATED_BY: changedBy,
@@ -169,7 +177,7 @@ class MasterUploadService {
         await this.masterRepository.upsertBatch(enriched);
         inserted = enriched.length;
       } catch (upsertErr) {
-       
+  
         const msg = String(upsertErr?.message || '').toLowerCase();
         if (upsertErr?.code == 301 || msg.includes('unique constraint') || msg.includes('duplicate')) {
           const sampleId = enriched[0]?.ID || '';
@@ -245,6 +253,9 @@ class MasterUploadService {
       console.warn(`[MasterUploadService] audit write failed: ${auditErr.message}`);
     }
 
+    /* -------------------------------------------------------------- */
+    /* 7) Result back to the UI                                         */
+    /* -------------------------------------------------------------- */
     const message =
       errorCount === 0
         ? `${inserted} record(s) inserted into MOBI_DB_MASTER with STATUS_CODE 063 (BP_CREATED_SUCCESS).`
@@ -264,6 +275,7 @@ class MasterUploadService {
     };
   }
 
+  /** composite-key set (portal|company|id) - same logic as UnifiedIngestionHandler */
   async _loadExistingIdKeys(candidates) {
     const keySet = new Set();
     const ids = [
@@ -293,12 +305,10 @@ class MasterUploadService {
 module.exports = cds.service.impl(async function () {
   await StatusCodeUtil.ensureStatusTable();
 
-  
   const masterRepository = new MasterRepository();
   const fileLogRepository = new FileLogRepository();
   const auditRepository = new AuditRepository();
 
-  
   const masterUploadService = new MasterUploadService({
     masterRepository,
     fileLogRepository,
@@ -310,7 +320,6 @@ module.exports = cds.service.impl(async function () {
 
   this.on('getStatus', () => 'Master BP upload service is up');
 
- 
   this.on('uploadMasterRecords', async (req) => {
     const { fileName, records } = req.data || {};
     const actor = actorOf(req);
