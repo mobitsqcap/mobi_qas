@@ -14,10 +14,11 @@ sap.ui.define([
             });
 
             this.getView().setModel(oModel, "tableModel");
-  
+            // Disable HANA Push button when application opens
             this.byId("btnHanaPush").setEnabled(false);
             this.byId("btnDownloadGL").setEnabled(false);
 
+            // Warn before refresh/close
             this._beforeUnloadHandler = this._beforeUnload.bind(this);
             window.addEventListener("beforeunload", this._beforeUnloadHandler);
         },
@@ -30,7 +31,9 @@ sap.ui.define([
         },
         // Download Template
         onDownload: function () {
+
             var sUrl = sap.ui.require.toUrl("glvlookup/template/Sample-Template.xlsx");
+
             var oLink = document.createElement("a");
             oLink.href = sUrl;
             oLink.setAttribute("download", "Sample-Template.xlsx");
@@ -40,6 +43,7 @@ sap.ui.define([
             document.body.appendChild(oLink);
             oLink.click();
             document.body.removeChild(oLink);
+
         },
         // Help Dialog
         onHelp: function () {
@@ -55,36 +59,59 @@ sap.ui.define([
                     this._oHelpDialog = oDialog;
                     this.getView().addDependent(oDialog);
                     oDialog.open();
+
                 }.bind(this));
+
             } else {
+
                 this._oHelpDialog.open();
+
             }
         },
         onCloseHelp: function () {
+
             this._oHelpDialog.close();
         },
+
         // Upload Excel
         onUpload: function (oEvent) {
+
             var aFiles = oEvent.getParameter("files");
+
             if (!aFiles || aFiles.length === 0) {
                 return;
             }
+
             var oFile = aFiles[0];
             var oReader = new FileReader();
+
             oReader.onload = function (e) {
+
                 try {
+
                     var sData = e.target.result;
+
                     var oWorkbook = XLSX.read(sData, {
                         type: "binary"
                     });
+
                     var sSheetName = oWorkbook.SheetNames[0];
                     var oWorksheet = oWorkbook.Sheets[sSheetName];
+
+                    // Read Excel Data
                     var aData = XLSX.utils.sheet_to_json(oWorksheet);
+
+                    // Check if Excel is empty
                     if (!aData || aData.length === 0) {
                         this.byId("btnHanaPush").setEnabled(false);
                         MessageBox.error("The uploaded Excel file is empty. Please upload a valid file with data.");
                         return;
                     }
+
+                    // ===============================
+                    // Template Validation
+                    // ===============================
+
                     var aExpectedHeaders = [
                         "Company Code",
                         "Payment Type",
@@ -97,56 +124,86 @@ sap.ui.define([
                         "mobi_mdr_amount",
                         "mdr_revenue"
                     ];
+
                     var aActualHeaders = [];
+
                     if (oWorksheet["!ref"]) {
+
                         var oRange = XLSX.utils.decode_range(oWorksheet["!ref"]);
+
                         for (var c = oRange.s.c; c <= oRange.e.c; c++) {
+
                             var sCell = XLSX.utils.encode_cell({
                                 r: oRange.s.r,
                                 c: c
                             });
+
                             var oCell = oWorksheet[sCell];
+
                             aActualHeaders.push(oCell ? String(oCell.v).trim() : "");
                         }
                     }
+
                     var bValidTemplate = aExpectedHeaders.every(function (sHeader) {
                         return aActualHeaders.indexOf(sHeader) !== -1;
                     });
+
                     if (!bValidTemplate) {
                         MessageBox.error("Please upload valid template.");
                         return;
                     }
+
+                    // ===============================
+                    // Row Validations
+                    // ===============================
+
                     var aErrors = [];
-                    var oGLMap = {}; 
-                    var oCombinationMap = {}; 
+                    var oGLMap = {}; //for Duplicate GL Accounts
+                    var oCombinationMap = {}; // For duplicate combination
                     var iDuplicateCount = 0;
                     var aDuplicateGLs = [];
+
                     aData.forEach(function (oRow, iIndex) {
                         var bInvalid = false;
                         var aRowErrors = [];
+
                         oRow.Status = "Valid";
                         var iRow = iIndex + 2;
+
                         var sCompanyCode = String(oRow["Company Code"] || "").trim();
                         var sPaymentType = String(oRow["Payment Type"] || "").trim().toUpperCase();
                         var sPaymentSubType = String(oRow["Payment Sub Type"] || "").trim().toUpperCase();
                         var sHost = String(oRow["Host"] || "").trim().toUpperCase();
+
+                        // Update the row so the table displays the uppercase values
                         oRow["Payment Type"] = sPaymentType;
                         oRow["Payment Sub Type"] = sPaymentSubType;
                         oRow["Host"] = sHost;
                         var sGLAccounts = String(oRow["GL Accounts"] || "").trim();
-                        if (sGLAccounts) {
-                            if (oGLMap[sGLAccounts]) {
-                                iDuplicateCount++;
-                                aDuplicateGLs.push(
-                                    sGLAccounts + " (Row " + iRow + ")"
-                                );
-                                aRowErrors.push("Duplicate GL Account");
-                                bInvalid = true;
-                            }
-                            else {
-                                oGLMap[sGLAccounts] = iRow;
-                            }
-                        }
+                        // Duplicate GL Account Validation
+
+                        // if (sGLAccounts) {
+                        //     if (oGLMap[sGLAccounts]) {
+
+                        //         iDuplicateCount++;
+
+                        //         aDuplicateGLs.push(
+                        //             sGLAccounts + " (Row " + iRow + ")"
+                        //         );
+
+                        //         aRowErrors.push("Duplicate GL Account");
+
+                        //         bInvalid = true;
+
+                        //     }
+                        //     else {
+
+                        //         oGLMap[sGLAccounts] = iRow;
+
+                        //     }
+
+                        // }
+
                         var sTransactionAmount = String(oRow["transaction_amount"] || "").trim();
                         var sHostMdrAmount = String(oRow["host_mdr_amount"] || "").trim();
                         var sHostFeePayable = String(oRow["host_fee_payable"] || "").trim();
@@ -173,90 +230,126 @@ sap.ui.define([
                             sPaymentType + "|" +
                             sPaymentSubType + "|" +
                             sHost + "|" +
-                            sSequence;
+                            sSequence + "|" +
+                            sGLAccounts;
+
                         if (oCombinationMap[sCombinationKey]) {
+
                             aErrors.push(
                                 "Row " + iRow +
                                 ": Duplicate combination of Company Code, Payment Type, Payment Sub Type, Host and Sequence."
                             );
+
                             aRowErrors.push("Duplicate Combination");
                             bInvalid = true;
+
                         } else {
+
                             oCombinationMap[sCombinationKey] = iRow;
+
                         }
+
+                        // Exactly one field should contain 'X'
                         var xCount = 0;
+
                         if (sTransactionAmount === "X") xCount++;
                         if (sHostMdrAmount === "X") xCount++;
                         if (sHostFeePayable === "X") xCount++;
                         if (sMobiMdrAmount === "X") xCount++;
                         if (sMdrRevenue === "X") xCount++;
+
                         if (xCount !== 1) {
                             aErrors.push(
                                 "Row " + iRow +
                                 ": Exactly one of Transaction Amount, Host MDR Amount, Host Fee Payable, Mobi MDR Amount or MDR Revenue must contain 'X'."
+
                             );
                             bInvalid = true;
                             oRow.Status = "Invalid combination of X";
                         }
+                        // Mandatory Fields
                         if (!sCompanyCode) {
                             aErrors.push("Row " + iRow + ": Company Code is mandatory.");
                             aRowErrors.push("Company Code Mandatory");
                             bInvalid = true;
                         }
+
                         if (!sPaymentType) {
                             aErrors.push("Row " + iRow + ": Payment Type is mandatory.");
                             bInvalid = true;
                         }
+
                         if (!sPaymentSubType) {
                             aErrors.push("Row " + iRow + ": Payment Sub Type is mandatory.");
                             bInvalid = true;
                         }
+
                         if (!sHost) {
                             aErrors.push("Row " + iRow + ": Host is mandatory.");
                             bInvalid = true;
                         }
+
                         if (!sGLAccounts) {
                             aErrors.push("Row " + iRow + ": GL Accounts is mandatory.");
                             bInvalid = true;
                         }
+
+                        // Company Code - 4 digits
                         if (sCompanyCode && !/^\d{4}$/.test(sCompanyCode)) {
                             aErrors.push("Row " + iRow + ": Company Code must contain exactly 4 digits.");
                             bInvalid = true;
                             aRowErrors.push("Invalid Company Code");
                         }
+
+                        // Company Code - Allowed values only
                         var aAllowedCompanyCodes = ["1000", "2000", "3000", "4000", "5000"];
+
                         if (sCompanyCode &&
                             /^\d{4}$/.test(sCompanyCode) &&
                             !aAllowedCompanyCodes.includes(sCompanyCode)) {
+
                             aErrors.push(
                                 "Row " + iRow +
                                 ": Company Code must be one of 1000, 2000, 3000, 4000 or 5000."
                             );
+
                             bInvalid = true;
                             aRowErrors.push("Invalid Company Code");
                         }
+                        // GL Accounts - 8 digits
                         if (sGLAccounts && !/^\d{8}$/.test(sGLAccounts)) {
                             aErrors.push("Row " + iRow + ": GL Accounts must contain exactly 8 digits.");
                             bInvalid = true;
                             // oRow.Status = "Invalid GL Account";
                             aRowErrors.push("Invalid GL Account");
                         }
+
+                        // Payment Type
                         if (sPaymentType &&
                             sPaymentType !== "PAYINS" &&
                             sPaymentType !== "PAYOUT") {
+
                             aErrors.push("Row " + iRow + ": Payment Type must be either Payins or Payout.");
                             bInvalid = true;
+                            // oRow.Status = "Invalid Payment Type";
                             aRowErrors.push("Invalid Payment Type");
                         }
+
+                        // Payment Sub Type - String
                         if (sPaymentSubType && !/^[A-Za-z ]+$/.test(sPaymentSubType)) {
                             aErrors.push("Row " + iRow + ": Payment Sub Type must contain only alphabets.");
                             bInvalid = true;
                         }
+
+                        // Host - String and max 20 characters
                         if (sHost && sHost.length > 20) {
                             aErrors.push("Row " + iRow + ": Host must not exceed 20 characters.");
                             bInvalid = true;
+                            // oRow.Status = "Host Length Exceeded";
                             aRowErrors.push("Host Length Exceeded");
                         }
+
+                        // Validate only X or blank
                         var aFields = [
                             { value: sTransactionAmount, name: "Transaction Amount" },
                             { value: sHostMdrAmount, name: "Host MDR Amount" },
@@ -264,13 +357,16 @@ sap.ui.define([
                             { value: sMobiMdrAmount, name: "Mobi MDR Amount" },
                             { value: sMdrRevenue, name: "MDR Revenue" }
                         ];
+
                         var xCount = 0;
+
                         aFields.forEach(function (field) {
                             if (field.value !== "" && field.value !== "X") {
                                 aErrors.push(
                                     "Row " + iRow + ": " + field.name + " must contain only 'X' or be blank."
                                 );
                                 bInvalid = true;
+                                // oRow.Status = "Invalid X Value";
                                 aRowErrors.push("invalid combination of X");
                             }
 
@@ -285,6 +381,7 @@ sap.ui.define([
                                 ": Exactly one of Transaction Amount, Host MDR Amount, Host Fee Payable, Mobi MDR Amount or MDR Revenue must contain 'X'."
                             );
                             bInvalid = true;
+
                         }
                         if (aRowErrors.length > 0) {
                             oRow.Status = aRowErrors.join(", ");
@@ -304,6 +401,8 @@ sap.ui.define([
                         this.byId("uploadSummary").setText("");
 
                     }
+
+                    // Bind data to table
                     var oModel = this.getView().getModel("tableModel");
                     var sSummary =
                         "Total Records : " + aData.length;
@@ -333,13 +432,18 @@ sap.ui.define([
 
                     console.error(oError);
                     MessageBox.error("Please upload valid template.");
+
                 }
+
             }.bind(this);
+
             oReader.readAsBinaryString(oFile);
+
         },
         onhanapush: async function () {
             const oUploadButton = this.byId("btnHanaPush");
             try {
+
                 const aData = this.getView()
                     .getModel("tableModel")
                     .getProperty("/data");
@@ -372,6 +476,7 @@ sap.ui.define([
                     CHANGED_BY: "SYSTEM",
                     CHANGED_TIMESTAMP: new Date().toISOString()
                 }));
+
                 const oModel = this.getOwnerComponent().getModel();
                 const oAction = oModel.bindContext(
                     "/uploadExcelData(...)",
@@ -385,9 +490,13 @@ sap.ui.define([
                     aPayload
                 );
                 await oAction.execute("$direct");
+
+                // Update the Status column in the table
                 aData.forEach(function (row) {
-                    row.Status = "A";  
+                    row.Status = "A";    // or "Success" if you want to display Success
                 });
+
+                // Refresh the table
                 this.getView().getModel("tableModel").refresh(true);
                 this.byId("uploadSummary").setText(
                     "Valid Records : " + aPayload.length +
@@ -429,66 +538,115 @@ sap.ui.define([
                     this.byId("uploadSummary").setText(sSummary);
                     this.byId("uploadSummary").setVisible(true);
                     var aTableData = this.getView().getModel("tableModel").getProperty("/data");
-                    var sMessage = e.error.message;
+ var sMessage = e.error.message;
 
-                    if (sMessage.startsWith("Duplicate GL Account(s) found:")) {
+if (sMessage === "Duplicate records found.") {
 
-                        var sDuplicateList = sMessage.replace("Duplicate GL Account(s) found:", "").trim();
+    var aDuplicateData = oSummary.duplicateData || [];
 
-                        var aDuplicateGLs = sDuplicateList.split(",").map(function (gl) {
-                            return gl.trim();
-                        });
+    aTableData.forEach(function (row) {
 
-                        aTableData.forEach(function (row) {
+        var bIsDuplicate = aDuplicateData.some(function (duplicate) {
 
-                            if (aDuplicateGLs.indexOf(String(row["GL Accounts"]).trim()) !== -1) {
-                                row.rowHighlight = "Error";
-                                row.Status = "Duplicate";
-                            }
-                        });
-                    } else if (sMessage.startsWith("Invalid Host(s):")) {
+            return (
+                String(row["Company Code"] || "").trim() === String(duplicate.COMPANY_CODE || "").trim() &&
+                String(row["Payment Type"] || "").trim() === String(duplicate.PAYMENT_TYPE || "").trim() &&
+                String(row["Payment Sub Type"] || "").trim() === String(duplicate.PAYMENT_SUB_TYPE || "").trim() &&
+                String(row["Host"] || "").trim() === String(duplicate.HOST_NAME || "").trim() &&
+                String(row["transaction_amount"] || "").trim() === String(duplicate.TXN_AMOUNT || "").trim() &&
+                String(row["host_mdr_amount"] || "").trim() === String(duplicate.HOST_MDR_AMOUNT || "").trim() &&
+                String(row["host_fee_payable"] || "").trim() === String(duplicate.HOST_FEE_PAYABLE || "").trim() &&
+                String(row["mobi_mdr_amount"] || "").trim() === String(duplicate.MOBI_MDR_AMOUNT || "").trim() &&
+                String(row["mdr_revenue"] || "").trim() === String(duplicate.MDR_REVENUE || "").trim() &&
+                String(row["GL Accounts"] || "").trim() === String(duplicate.GL_Accounts || "").trim()
+            );
+
+        });
+
+        if (bIsDuplicate) {
+
+            row.rowHighlight = "Error";
+            row.Status = "Duplicate";
+
+        } else {
+
+            row.rowHighlight = "Success";
+            row.Status = "Valid";
+
+        }
+
+    });
+}
+                    else if (sMessage.startsWith("Invalid Host(s):")) {
+
                         var sHostList = sMessage.replace("Invalid Host(s):", "").trim();
+
                         var aInvalidHosts = sHostList.split(",").map(function (host) {
                             return host.trim().toUpperCase();
                         });
+
                         aTableData.forEach(function (row) {
+
                             if (aInvalidHosts.indexOf(String(row["Host"]).trim().toUpperCase()) !== -1) {
+
                                 row.rowHighlight = "Error";
                                 row.Status = "Invalid Host";
+
                             }
+
                         });
+
                     }
+
                     this.getView().getModel("tableModel").refresh(true);
                 } catch (err) {
                     console.log(err);
                 }
                 var sErrorText = "";
+
                 if (oSummary.duplicateRecords > 0) {
+
                     sErrorText =
                         "Duplicate Records : " + oSummary.duplicateRecords;
+
                 } else if (oSummary.invalidHosts > 0) {
+
                     sErrorText =
                         "Invalid Hosts : " + oSummary.invalidHosts;
+
                 } else {
+
                     sErrorText = sError;
                 }
+
+                // MessageBox.error(sErrorText);
                 var sPopupMessage = "Data not pushed to Database.";
+
                 if (sErrorText) {
                     sPopupMessage += "\n\n" + sErrorText;
                 }
+
                 MessageBox.error(sPopupMessage, {
                     title: "Upload Failed"
                 });
                 oUploadButton.setEnabled(false);
+
             }
         },
         onDisplayGLData: async function () {
+
             try {
+
                 var oModel = this.getOwnerComponent().getModel();
+
                 var oAction = oModel.bindContext("/displayGLData(...)");
+
                 await oAction.execute();
+
                 var oResult = oAction.getBoundContext().getObject();
+
                 var aRecords = oResult.value || oResult;
+
                 var aTableData = aRecords.map(function (row) {
                     return {
                         "Company Code": row.COMPANY_CODE,
@@ -504,23 +662,35 @@ sap.ui.define([
                         "Status": row.Status
                     };
                 });
+
                 this.getView().getModel("tableModel").setProperty("/data", aTableData);
                 this.byId("btnDownloadGL").setEnabled(true);
+                // Disable Upload button after displaying DB data
                 this.byId("btnHanaPush").setEnabled(false);
+
                 sap.m.MessageToast.show("GL Data Loaded Successfully");
+
             } catch (e) {
+
                 console.error(e);
+
                 sap.m.MessageToast.show("Unable to load GL Data");
+
             }
+
         },
         onDownloadGLData: function () {
+
             var aData = this.getView()
                 .getModel("tableModel")
                 .getProperty("/data");
+
             if (!aData || aData.length === 0) {
                 sap.m.MessageBox.information("No GL Data available.");
                 return;
             }
+
+            // Arrange columns in required order
             var aExcelData = aData.map(function (oRow) {
                 return {
                     "Company Code": oRow["Company Code"],
@@ -536,20 +706,30 @@ sap.ui.define([
                     "Status": oRow["Status"]
                 };
             });
+
+            // Create worksheet
             var oWorksheet = XLSX.utils.json_to_sheet(aExcelData);
+
+            // Create workbook
             var oWorkbook = XLSX.utils.book_new();
+
             XLSX.utils.book_append_sheet(
                 oWorkbook,
                 oWorksheet,
                 "GL Data"
             );
+
+            // Download Excel
             XLSX.writeFile(
                 oWorkbook,
                 "GL_Data.xlsx"
             );
+
             sap.m.MessageToast.show("GL Data downloaded successfully.");
+            // Disable buttons after download
             this.byId("btnDownloadGL").setEnabled(false);
             this.byId("btnDisplay").setEnabled(false);
         }
     });
+
 });
